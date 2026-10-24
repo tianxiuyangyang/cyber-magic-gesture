@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#000000" />
+  <meta name="color-scheme" content="dark" />
+  <title>赛博魔法 · 手势骨骼</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2032%2032'%3E%3Crect%20width='32'%20height='32'%20fill='%23000'/%3E%3Ccircle%20cx='8'%20cy='8'%20r='2'%20fill='%2364e0e8'/%3E%3Ccircle%20cx='16'%20cy='5'%20r='2'%20fill='%23fff'/%3E%3Ccircle%20cx='24'%20cy='8'%20r='2'%20fill='%2364e0e8'/%3E%3Cpath%20d='M8%208L16%2018L24%208M16%2018L16%2027'%20fill='none'%20stroke='%2364e0e8'%20stroke-width='1.6'/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <!-- 摄像头只用于本机手部识别，不显示画面。 -->
+  <video id="camera" playsinline muted autoplay aria-hidden="true"></video>
+
+  <!-- 大屏赛博朋克城市背景。小屏完全隐藏。 -->
+  <div id="city-backdrop" class="city-backdrop" hidden aria-hidden="true">
+    <canvas id="city-canvas"></canvas>
+  </div>
+  <!-- 大屏手势技能：跟随玩家的能量手 + 蓝色能量球。小屏会完全隐藏。 -->
+  <canvas id="virtual-hand-canvas" class="virtual-hand-canvas" hidden aria-hidden="true"></canvas>
+  <canvas id="energy-canvas" class="energy-canvas" hidden aria-hidden="true"></canvas>
+  <div id="energy-hint" class="energy-hint" hidden aria-hidden="true">
+    <span class="energy-hint-sign" aria-hidden="true"></span>
+    <span>拇指与食指捏合聚能 · 弹指射向城市</span>
+  </div>
+  <!-- 入口 -->
+  <section id="gate" class="gate" aria-labelledby="gate-title">
+    <div class="gate-card">
+      <div class="sigil" aria-hidden="true"></div>
+      <h1 id="gate-title">赛博魔法</h1>
+      <p class="tagline">手势骨骼监测</p>
+      <p class="intro">将手放入摄像头画面。<br />右上角会实时显示 21 个关节点与当前手势。</p>
+      <div class="actions">
+        <button id="start" class="btn primary" type="button">开始识别</button>
+      </div>
+      <p id="gate-status" class="status" role="status" aria-live="polite"></p>
+      <p class="footnote">画面仅在本机处理 · 不会上传</p>
+    </div>
+  </section>
+
+  <!-- 右上角手势骨骼状态窗 -->
+  <aside id="hand-panel" class="hand-panel" hidden aria-hidden="true" aria-label="手势骨骼状态">
+    <header class="panel-head">
+      <div class="panel-title">
+        <span class="live-dot" aria-hidden="true"></span>
+        <span>HAND TRACKING</span>
+      </div>
+      <div class="panel-runtime">
+        <span id="tracker-backend">INIT</span>
+        <span class="runtime-divider" aria-hidden="true"></span>
+        <span id="hand-fps">-- FPS</span>
+      </div>
+    </header>
+
+    <div id="skeleton-stage" class="skeleton-stage is-empty" data-pose="none">
+      <canvas id="hand-skeleton" aria-label="手部 21 点骨骼图"></canvas>
+      <div id="hand-empty" class="hand-empty">
+        <span class="empty-icon" aria-hidden="true"></span>
+        <span>等待手部进入画面</span>
+      </div>
+      <div class="stage-caption" aria-hidden="true">
+        <span>21 PT</span>
+        <span id="hand-side">--</span>
+      </div>
+    </div>
+
+    <div class="hand-summary">
+      <div class="summary-copy">
+        <span class="summary-kicker">当前手势</span>
+        <strong id="hand-gesture" class="gesture-name">等待识别</strong>
+      </div>
+      <div class="confidence">
+        <span>置信度</span>
+        <strong id="hand-score">--</strong>
+      </div>
+    </div>
+
+    <div id="finger-row" class="finger-row" aria-label="手指伸展状态">
+      <span data-finger="thumb"><i aria-hidden="true"></i>拇指</span>
+      <span data-finger="index"><i aria-hidden="true"></i>食指</span>
+      <span data-finger="middle"><i aria-hidden="true"></i>中指</span>
+      <span data-finger="ring"><i aria-hidden="true"></i>无名指</span>
+      <span data-finger="pinky"><i aria-hidden="true"></i>小指</span>
+    </div>
+
+    <footer class="panel-foot">
+      <span id="hand-message">把手放进摄像头画面</span>
+      <span id="hand-points">0 / 21</span>
+    </footer>
+  </aside>
+
+  <!-- 按 H 临时呼出的帮助 -->
+  <aside id="help" class="help" hidden aria-hidden="true">
+    <div class="help-grid">
+      <div class="help-block">
+        <h2>状态窗</h2>
+        <p><span>青色骨架</span><span>21 个关节点</span></p>
+        <p><span>高亮指尖</span><span>当前手势</span></p>
+        <p><span>底部圆点</span><span>手指是否伸展</span></p>
+      </div>
+      <div class="help-block">
+        <h2>快捷键</h2>
+        <p><span><kbd>M</kbd></span><span>镜像开关</span></p>
+        <p><span><kbd>F</kbd></span><span>全屏切换</span></p>
+        <p><span><kbd>H</kbd></span><span>收起帮助</span></p>
+      </div>
+    </div>
+    <p class="help-foot">保持整只手落在画面内，骨架识别会更稳定。</p>
+  </aside>
+
+  <noscript><p class="noscript">这个页面需要启用 JavaScript。</p></noscript>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
+
+
+
+
+
