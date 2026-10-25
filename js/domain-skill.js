@@ -322,9 +322,9 @@ export class DomainExperience {
     ctx.stroke();
 
     ctx.globalCompositeOperation = 'lighter';
-    ctx.shadowColor = `rgba(255, 36, 55, ${0.9 * alpha})`;
+    ctx.shadowColor = `rgba(75, 200, 255, ${0.9 * alpha})`;
     ctx.shadowBlur = 14 + width * 3;
-    ctx.strokeStyle = `rgba(255, 48, 63, ${0.72 * alpha})`;
+    ctx.strokeStyle = `rgba(88, 210, 255, ${0.72 * alpha})`;
     ctx.lineWidth = width + 1.5;
     ctx.beginPath();
     ctx.moveTo(points[0][0], points[0][1]);
@@ -351,8 +351,8 @@ export class DomainExperience {
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
     ctx.translate(p[0], p[1]);
-    ctx.strokeStyle = `rgba(255, 64, 72, ${0.32 + progress * 0.5})`;
-    ctx.shadowColor = 'rgba(255, 30, 52, 0.95)';
+    ctx.strokeStyle = `rgba(170, 235, 255, ${0.32 + progress * 0.5})`;
+    ctx.shadowColor = 'rgba(70, 205, 255, 0.95)';
     ctx.shadowBlur = 24;
     ctx.lineWidth = 1.4 + progress * 1.6;
     ctx.beginPath();
@@ -365,7 +365,7 @@ export class DomainExperience {
     ctx.setLineDash([]);
     for (let i = 0; i < 10; i += 1) {
       const angle = (i / 10) * TAU + now * 0.0007;
-      ctx.fillStyle = `rgba(255, ${160 + i * 7}, 170, ${0.35 + progress * 0.4})`;
+      ctx.fillStyle = `rgba(${185 + i * 4}, 235, 255, ${0.35 + progress * 0.4})`;
       ctx.beginPath();
       ctx.arc(Math.cos(angle) * (78 + progress * 14), Math.sin(angle) * (78 + progress * 14), 1.5, 0, TAU);
       ctx.fill();
@@ -380,8 +380,8 @@ export class DomainExperience {
       this.width * 0.5, this.height * 0.46, 0,
       this.width * 0.5, this.height * 0.46, Math.max(this.width, this.height) * 0.72,
     );
-    veil.addColorStop(0, `rgba(74, 0, 14, ${0.11 + this.flash * 0.18})`);
-    veil.addColorStop(0.55, 'rgba(18, 0, 5, 0.28)');
+    veil.addColorStop(0, `rgba(4, 18, 30, ${0.11 + this.flash * 0.18})`);
+    veil.addColorStop(0.55, 'rgba(3, 8, 15, 0.3)');
     veil.addColorStop(1, 'rgba(0, 0, 0, 0.72)');
     ctx.fillStyle = veil;
     ctx.fillRect(0, 0, this.width, this.height);
@@ -392,8 +392,8 @@ export class DomainExperience {
     const topY = this.height * 0.24;
     const half = Math.min(this.width * 0.19, this.height * 0.31);
     ctx.globalCompositeOperation = 'lighter';
-    ctx.strokeStyle = 'rgba(255, 45, 62, 0.28)';
-    ctx.shadowColor = 'rgba(255, 20, 40, 0.9)';
+    ctx.strokeStyle = 'rgba(174, 233, 255, 0.3)';
+    ctx.shadowColor = 'rgba(74, 210, 255, 0.9)';
     ctx.shadowBlur = 26;
     ctx.lineWidth = 2;
     ctx.beginPath();
@@ -417,7 +417,7 @@ export class DomainExperience {
     for (let i = 0; i < 16; i += 1) {
       const y = this.height * (0.08 + i * 0.052);
       const offset = Math.sin(i * 2.7 + now * 0.0018) * this.width * 0.12;
-      ctx.strokeStyle = `rgba(255, 48, 60, ${0.025 + (i % 4) * 0.012})`;
+      ctx.strokeStyle = `rgba(170, 230, 255, ${0.025 + (i % 4) * 0.012})`;
       ctx.beginPath();
       ctx.moveTo(-40 + offset, y);
       ctx.lineTo(this.width + 40, y - this.height * 0.04);
@@ -427,7 +427,7 @@ export class DomainExperience {
     // 全屏脉动红光
     const flashAlpha = this.flash * 0.22 * pulse;
     if (flashAlpha > 0.005) {
-      ctx.fillStyle = `rgba(255, 30, 52, ${flashAlpha})`;
+      ctx.fillStyle = `rgba(190, 240, 255, ${flashAlpha})`;
       ctx.fillRect(0, 0, this.width, this.height);
     }
     ctx.restore();
@@ -437,12 +437,12 @@ export class DomainExperience {
     ctx.save();
     ctx.textAlign = 'center';
     ctx.globalCompositeOperation = 'lighter';
-    ctx.shadowColor = 'rgba(255, 30, 50, 0.95)';
+    ctx.shadowColor = 'rgba(75, 205, 255, 0.95)';
     ctx.shadowBlur = 18;
-    ctx.fillStyle = 'rgba(255, 215, 210, 0.78)';
+    ctx.fillStyle = 'rgba(224, 249, 255, 0.82)';
     ctx.font = `600 ${Math.max(22, Math.min(42, this.width * 0.028))}px "Microsoft YaHei UI", sans-serif`;
     ctx.fillText('伏 魔 御 厨 子', this.width * 0.5, this.height * 0.13);
-    ctx.fillStyle = 'rgba(255, 80, 94, 0.58)';
+    ctx.fillStyle = 'rgba(154, 220, 242, 0.62)';
     ctx.font = `500 ${Math.max(9, this.width * 0.008)}px ui-monospace, Consolas, monospace`;
     ctx.fillText(`DOMAIN EXPANSION  ${(5 - elapsed / 1000).toFixed(1)}s`, this.width * 0.5, this.height * 0.16);
     ctx.restore();
@@ -488,9 +488,9 @@ export class DomainExperience {
     ctx.stroke();
 
     ctx.globalCompositeOperation = 'lighter';
-    ctx.shadowColor = 'rgba(255, 34, 54, 1)';
+    ctx.shadowColor = 'rgba(76, 210, 255, 1)';
     ctx.shadowBlur = 40;
-    ctx.strokeStyle = `rgba(255, 46, 62, ${0.55 + windup * 0.35})`;
+    ctx.strokeStyle = `rgba(88, 214, 255, ${0.55 + windup * 0.35})`;
     ctx.lineWidth = 13 + 12 * windup;
     ctx.beginPath();
     ctx.moveTo(points[0][0], points[0][1]);
@@ -515,7 +515,7 @@ export class DomainExperience {
       const sx = x0 + dx * along - Math.sin(Math.atan2(dy, dx)) * side;
       const sy = y0 + dy * along + Math.cos(Math.atan2(dy, dx)) * side;
       const size = 2 + seeded(121, i) * 9;
-      ctx.fillStyle = `rgba(${i % 3 === 0 ? '255, 245, 242' : '255, 48, 62'}, ${0.2 + windup * 0.55})`;
+      ctx.fillStyle = `rgba(${i % 3 === 0 ? '245, 253, 255' : '90, 214, 255'}, ${0.2 + windup * 0.55})`;
       ctx.save();
       ctx.translate(sx, sy);
       ctx.rotate(Math.atan2(dy, dx) + (seeded(151, i) - 0.5) * 0.8);
@@ -525,10 +525,10 @@ export class DomainExperience {
 
     if (p > 0.68) {
       const fade = Math.min(1, (p - 0.68) / 0.32);
-      ctx.fillStyle = `rgba(255, 30, 48, ${fade * 0.08})`;
+      ctx.fillStyle = `rgba(90, 214, 255, ${fade * 0.08})`;
       ctx.fillRect(0, 0, this.width, this.height);
       ctx.textAlign = 'center';
-      ctx.shadowColor = 'rgba(255, 36, 52, 0.95)';
+      ctx.shadowColor = 'rgba(76, 210, 255, 0.95)';
       ctx.shadowBlur = 24;
       ctx.fillStyle = `rgba(255, 230, 225, ${fade * 0.82})`;
       ctx.font = `600 ${Math.max(24, Math.min(54, this.width * 0.034))}px "Microsoft YaHei UI", sans-serif`;
@@ -565,6 +565,8 @@ function seeded(seed, index) {
   const value = Math.sin(seed * 12.9898 + index * 78.233) * 43758.5453;
   return value - Math.floor(value);
 }
+
+
 
 
 

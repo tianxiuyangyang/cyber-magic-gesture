@@ -34,14 +34,32 @@ export class VirtualHandExperience {
     this.width = 1;
     this.height = 1;
     this.dpr = 1;
-    this.currentPoints = null;
-    this.targetLandmarks = null;
-    this.lastTargetAt = 0;
+    this.tracks = new Map();
     this.lastRender = 0;
-    this.alpha = 0;
     this.wasActive = false;
-    this.demoHold = false;
     this.resize();
+  }
+
+  get primaryTrack() {
+    return this.tracks.values().next().value || null;
+  }
+
+  get currentPoints() {
+    return this.primaryTrack?.currentPoints || null;
+  }
+
+  get alpha() {
+    let alpha = 0;
+    for (const track of this.tracks.values()) alpha = Math.max(alpha, track.alpha);
+    return alpha;
+  }
+
+  get targetLandmarks() {
+    return this.primaryTrack?.targetLandmarks || null;
+  }
+
+  get handCount() {
+    return this.tracks.size;
   }
 
   setEnabled(enabled) {
@@ -64,81 +82,119 @@ export class VirtualHandExperience {
     this.canvas.height = Math.round(height * dpr);
     this.canvas.style.width = `${width}px`;
     this.canvas.style.height = `${height}px`;
-    if (this.targetLandmarks) {
-      const projected = projectNormalizedPoints(this.targetLandmarks, width, height);
-      if (projected.length) this.currentPoints = projected;
+    for (const track of this.tracks.values()) {
+      if (!track.targetLandmarks) continue;
+      const projected = projectNormalizedPoints(track.targetLandmarks, width, height);
+      if (projected.length === 21) track.currentPoints = projected;
     }
   }
 
-  update(hand, now) {
+  update(hands, now) {
     if (!this.enabled) return;
-    if (hand?.points?.length >= 21) {
-      this.targetLandmarks = hand.points;
-      this.lastTargetAt = now;
-      if (!this.currentPoints) {
-        this.currentPoints = projectNormalizedPoints(hand.points, this.width, this.height);
-        this.alpha = 1;
+    const list = (Array.isArray(hands) ? hands : [hands])
+      .filter((hand) => hand?.points?.length >= 21)
+      .slice(0, 2);
+    const used = new Set();
+    list.forEach((hand, index) => {
+      const label = hand.label && hand.label !== 'Unknown' ? hand.label : `hand-${index}`;
+      let key = label;
+      if (used.has(key)) key = `${label}-${index}`;
+      used.add(key);
+      let track = this.tracks.get(key);
+      if (!track) {
+        track = {
+          key,
+          targetLandmarks: null,
+          currentPoints: null,
+          lastTargetAt: 0,
+          alpha: 0,
+          demoHold: false,
+        };
+        this.tracks.set(key, track);
       }
-    }
+      track.targetLandmarks = hand.points;
+      track.lastTargetAt = now;
+      if (!track.currentPoints) {
+        track.currentPoints = projectNormalizedPoints(hand.points, this.width, this.height);
+        track.alpha = 1;
+      }
+    });
   }
 
   showDemo(hand, now = performance.now()) {
+    this.showDemoHands([hand], now);
+  }
+
+  showDemoHands(hands, now = performance.now()) {
     if (!this.enabled) return;
-    this.update(hand, now);
-    if (this.targetLandmarks) {
-      this.demoHold = true;
-      this.currentPoints = projectNormalizedPoints(this.targetLandmarks, this.width, this.height);
-      this.alpha = 1;
-      this.wasActive = true;
-      this.render(now, true);
+    this.clear();
+    this.update(hands, now);
+    for (const track of this.tracks.values()) {
+      track.demoHold = true;
+      track.currentPoints = projectNormalizedPoints(track.targetLandmarks, this.width, this.height);
+      track.alpha = 1;
     }
+    this.wasActive = this.tracks.size > 0;
+    this.render(now, true);
   }
 
   render(now, force = false) {
     if (!this.enabled || !this.ctx) return;
-    const active = this.demoHold || (!!this.targetLandmarks && now - this.lastTargetAt < 320);
-    if (!active && this.alpha <= 0.01 && !this.wasActive && !force) return;
+    let hasLive = false;
+    for (const track of this.tracks.values()) {
+      const active = track.demoHold || (!!track.targetLandmarks && now - track.lastTargetAt < 320);
+      if (active || track.alpha > 0.01) {
+        hasLive = true;
+        break;
+      }
+    }
+    if (!hasLive && !this.wasActive && !force) return;
 
     const dt = Math.max(0, Math.min(0.05, (now - (this.lastRender || now)) / 1000));
     this.lastRender = now;
-    const fadeAlpha = 1 - Math.exp(-dt * (active ? 20 : 11));
-    this.alpha += ((active ? 1 : 0) - this.alpha) * fadeAlpha;
-
-    if (active && this.targetLandmarks) {
-      const target = projectNormalizedPoints(this.targetLandmarks, this.width, this.height);
-      if (target.length === 21) {
-        if (!this.currentPoints || this.currentPoints.length !== 21) {
-          this.currentPoints = target;
-        } else {
-          let maxMove = 0;
-          for (let i = 0; i < 21; i += 1) {
-            maxMove = Math.max(
-              maxMove,
-              Math.hypot(target[i][0] - this.currentPoints[i][0], target[i][1] - this.currentPoints[i][1]),
-            );
-          }
-          // 快速移动时提高跟随速度，慢速时保持稳定；大屏上几乎无拖影。
-          const rate = 25 + Math.min(38, maxMove * 0.7);
-          const follow = 1 - Math.exp(-dt * rate);
-          this.currentPoints = this.currentPoints.map((point, index) => [
-            point[0] + (target[index][0] - point[0]) * follow,
-            point[1] + (target[index][1] - point[1]) * follow,
-          ]);
-        }
-      }
-    }
-
     const ctx = this.ctx;
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     ctx.clearRect(0, 0, this.width, this.height);
-    if (this.alpha > 0.01 && this.currentPoints) {
-      this.wasActive = true;
-      this.drawHand(ctx, this.currentPoints, this.alpha);
-    } else {
-      this.wasActive = false;
-    }
-  }
 
+    let anyVisible = false;
+    for (const track of this.tracks.values()) {
+      const active = track.demoHold || (!!track.targetLandmarks && now - track.lastTargetAt < 320);
+      const fade = 1 - Math.exp(-dt * (active ? 20 : 11));
+      track.alpha += ((active ? 1 : 0) - track.alpha) * fade;
+
+      if (active && track.targetLandmarks) {
+        const target = projectNormalizedPoints(track.targetLandmarks, this.width, this.height);
+        if (target.length === 21) {
+          if (!track.currentPoints || track.currentPoints.length !== 21) {
+            track.currentPoints = target;
+          } else {
+            let maxMove = 0;
+            for (let i = 0; i < 21; i += 1) {
+              maxMove = Math.max(
+                maxMove,
+                Math.hypot(
+                  target[i][0] - track.currentPoints[i][0],
+                  target[i][1] - track.currentPoints[i][1],
+                ),
+              );
+            }
+            const rate = 25 + Math.min(38, maxMove * 0.7);
+            const follow = 1 - Math.exp(-dt * rate);
+            track.currentPoints = track.currentPoints.map((point, index) => [
+              point[0] + (target[index][0] - point[0]) * follow,
+              point[1] + (target[index][1] - point[1]) * follow,
+            ]);
+          }
+        }
+      }
+
+      if (track.alpha > 0.01 && track.currentPoints) {
+        anyVisible = true;
+        this.drawHand(ctx, track.currentPoints, track.alpha);
+      }
+    }
+    this.wasActive = anyVisible;
+  }
   drawHand(ctx, points, alpha) {
     ctx.save();
     ctx.globalAlpha = alpha;
@@ -243,11 +299,8 @@ export class VirtualHandExperience {
   }
 
   clear() {
-    this.targetLandmarks = null;
-    this.currentPoints = null;
-    this.alpha = 0;
+    this.tracks.clear();
     this.wasActive = false;
-    this.demoHold = false;
     if (this.ctx) {
       this.ctx.setTransform(1, 0, 0, 1, 0, 0);
       this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
@@ -272,4 +325,6 @@ function average(points, indices) {
   }
   return [x / indices.length, y / indices.length];
 }
+
+
 

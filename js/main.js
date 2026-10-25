@@ -350,7 +350,7 @@ function cameraTick(now) {
   }
   const visibleHands = state.energyEnabled ? mirroredHands : mirroredHands.slice(0, 1);
   const best = chooseBestHand(visibleHands);
-  if (state.energyEnabled) virtualHand.update(best, now);
+  if (state.energyEnabled) virtualHand.update(visibleHands, now);
   updateGesture(interpreter.update(best), now, visibleHands.length);
 }
 
@@ -550,7 +550,7 @@ function runDomainDemo() {
   syncEnergySkill();
   if (state.energyEnabled) {
     const now = performance.now();
-    virtualHand.showDemo(left, now);
+    virtualHand.showDemoHands([left, right], now);
     domainExperience.showDemo(now);
     startLoop();
   }
@@ -607,6 +607,7 @@ async function runSelfTest() {
   output.textContent = JSON.stringify(result, null, 2);
   console.info('[selftest]', result);
 }
+
 
 
 

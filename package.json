@@ -1,11 +1,12 @@
 {
   "name": "cyber-magic-hand-status",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "private": true,
   "type": "module",
-  "description": "赛博魔法 · 赛博朋克手势骨骼、跟随能量手与弹指城市爆炸与伏魔御厨子",
+  "description": "赛博魔法 · 赛博朋克手势骨骼、双手跟随能量手与弹指城市爆炸与伏魔御厨子",
   "scripts": {
     "test": "node --test tests/logic.test.mjs"
   }
 }
+
 
