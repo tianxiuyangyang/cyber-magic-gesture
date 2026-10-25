@@ -74,6 +74,23 @@ function basePoints(scale, pose) {
   } else if (pose === 'peace') {
     foldFinger(points, 'ring', -0.06, -0.39, scale);
     foldFinger(points, 'pinky', -0.16, -0.35, scale);
+  } else if (pose === 'seal') {
+    // 五指指尖聚拢成印，对应“伏魔御厨子”的双手姿势。
+    const seal = [0.05 * scale, -0.42 * scale];
+    points.thumb_tip = seal;
+    points.thumb_ip = [0.14 * scale, -0.3 * scale];
+    points.index_tip = seal;
+    points.index_dip = [0.12 * scale, -0.48 * scale];
+    points.index_pip = [0.14 * scale, -0.54 * scale];
+    points.middle_tip = seal;
+    points.middle_dip = [0.05 * scale, -0.49 * scale];
+    points.middle_pip = [0.05 * scale, -0.55 * scale];
+    points.ring_tip = seal;
+    points.ring_dip = [-0.03 * scale, -0.47 * scale];
+    points.ring_pip = [-0.04 * scale, -0.52 * scale];
+    points.pinky_tip = seal;
+    points.pinky_dip = [-0.09 * scale, -0.43 * scale];
+    points.pinky_pip = [-0.12 * scale, -0.46 * scale];
   }
 
   return points;
@@ -81,7 +98,7 @@ function basePoints(scale, pose) {
 
 /**
  * 生成一只“手”。
- * @param {'point'|'pinch'|'open'|'fist'|'peace'} pose
+ * @param {'point'|'pinch'|'open'|'fist'|'peace'|'seal'} pose
  * @param {[number, number]} anchor 对应手势的关键点（point 用食指尖，其余用拇指尖）
  * @param {number} scale 手掌尺度（归一化单位）
  */
@@ -117,3 +134,4 @@ export function buildScriptedHands(frames = 160) {
   }
   return hands;
 }
+

@@ -25,6 +25,7 @@ import { mapLandmarkerResult } from '../js/landmark-result.js';
 import { fitLandmarks } from '../js/hand-status.js';
 import { EnergySkill, analyzeEnergyGesture } from '../js/energy-skill.js';
 import { projectNormalizedPoint } from '../js/screen-projection.js';
+import { analyzeDomainSeal, DomainSkill } from '../js/domain-skill.js';
 
 test('五根手指伸展状态与常见手势分类', () => {
   const point = makeHand('point', [0.6, 0.5]);
@@ -32,6 +33,7 @@ test('五根手指伸展状态与常见手势分类', () => {
   const open = makeHand('open', [0.6, 0.5]);
   const fist = makeHand('fist', [0.6, 0.5]);
   const peace = makeHand('peace', [0.6, 0.5]);
+  const seal = makeHand('seal', [0.6, 0.5]);
 
   assert.equal(point.points.length, 21);
   assert.ok(isPointing(point.points), '单指伸出应被识别');
@@ -49,6 +51,7 @@ test('五根手指伸展状态与常见手势分类', () => {
   assert.equal(classifyHandPose(open.points).id, 'open');
   assert.equal(classifyHandPose(fist.points).id, 'fist');
   assert.equal(classifyHandPose(peace.points).id, 'peace');
+  assert.equal(classifyHandPose(seal.points).id, 'seal');
 });
 
 test('手势状态机：单指 → 捏合 → 手离开', () => {
@@ -271,6 +274,34 @@ test('能量技能：弹开手指会射向城市并爆炸', () => {
   flicked.points[12] = [flicked.points[12][0] + 0.16, flicked.points[12][1] - 0.1];
   event = skill.update([flicked], 2530);
   assert.equal(event.type, 'fire', '捏合中快速弹指也应发射');
+});
+test('伏魔御厨子：必须双手五指聚拢成印', () => {
+  const left = makeHand('seal', [0.38, 0.55]);
+  const right = makeHand('seal', [0.62, 0.55]);
+  const seal = analyzeDomainSeal([left, right]);
+  assert.ok(seal.active);
+  assert.ok(seal.spread < 0.5);
+  assert.equal(analyzeDomainSeal([left]).active, false);
+  assert.equal(analyzeDomainSeal([makeHand('open', [0.38, 0.55]), right]).active, false);
+});
+
+test('伏魔御厨子：结印启动后进入 5 秒斩击与终结阶段', () => {
+  const skill = new DomainSkill({ holdMs: 100, barrageMs: 5000, finalMs: 2500, cooldownMs: 12000 });
+  const left = makeHand('seal', [0.38, 0.55]);
+  const right = makeHand('seal', [0.62, 0.55]);
+
+  let event = skill.update([left, right], 1000);
+  assert.equal(event.type, 'ready');
+  event = skill.update([left, right], 1100);
+  assert.equal(event.type, 'activate');
+
+  event = skill.update([left, right], 3000);
+  assert.equal(event.type, 'barrage');
+  event = skill.update([left, right], 6300);
+  assert.equal(event.type, 'final');
+  assert.ok(event.progress > 0 && event.progress < 1);
+  event = skill.update([left, right], 8700);
+  assert.equal(event.type, 'done');
 });
 
 

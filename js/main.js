@@ -11,6 +11,7 @@ import { HandStatusView } from './hand-status.js';
 import { ENERGY_BREAKPOINT, EnergyExperience } from './energy-skill.js';
 import { VirtualHandExperience } from './virtual-hand.js';
 import { CyberpunkCityBackground } from './city-background.js';
+import { DomainExperience } from './domain-skill.js';
 import { makeHand } from './scripted-hand.js';
 
 const NO_REPEAT_CODES = new Set(['KeyH', 'KeyF', 'KeyM']);
@@ -39,6 +40,7 @@ let statusView = null;
 let energyExperience = null;
 let virtualHand = null;
 let cityBackground = null;
+let domainExperience = null;
 let tracker = null;
 let camera = null;
 let trackerModule = null;
@@ -66,6 +68,7 @@ function boot() {
   dom.virtualHandCanvas = document.getElementById('virtual-hand-canvas');
   dom.cityBackdrop = document.getElementById('city-backdrop');
   dom.cityCanvas = document.getElementById('city-canvas');
+  dom.domainCanvas = document.getElementById('domain-canvas');
 
   if (!dom.start) return;
 
@@ -86,6 +89,7 @@ function boot() {
   energyExperience = new EnergyExperience(dom.energyCanvas, dom.energyHint);
   virtualHand = new VirtualHandExperience(dom.virtualHandCanvas);
   cityBackground = new CyberpunkCityBackground(dom.cityCanvas, dom.cityBackdrop);
+  domainExperience = new DomainExperience(dom.domainCanvas);
 
   window.__cyberMagic = {
     get interpreter() {
@@ -102,6 +106,9 @@ function boot() {
     },
     get cityBackground() {
       return cityBackground;
+    },
+    get domain() {
+      return domainExperience;
     },
     get state() {
       return state;
@@ -125,7 +132,8 @@ function boot() {
     return;
   }
   if (params.has('demo')) {
-    runDemo();
+    if (params.get('demo') === 'domain') runDomainDemo();
+    else runDemo();
     return;
   }
   if (params.get('autostart') === '1') {
@@ -228,6 +236,7 @@ function syncEnergySkill() {
   energyExperience.setEnabled(enabled);
   virtualHand.setEnabled(enabled);
   cityBackground.setEnabled(enabled);
+  domainExperience.setEnabled(enabled);
 }
 
 function showPanel() {
@@ -301,6 +310,7 @@ function frame(now) {
   if (state.energyEnabled) {
     virtualHand.render(now);
     energyExperience.render(now);
+    domainExperience.render(now);
   }
 }
 
@@ -308,7 +318,10 @@ function cameraTick(now) {
   // 摄像头断流或推理长时间没有更新时，状态窗回到等待状态。
   if (state.gesture?.present && now - state.lastDetectionAt > 900) {
     updateGesture(interpreter.update(null), now, 0);
-    if (state.energyEnabled) energyExperience.update([], now);
+    if (state.energyEnabled) {
+      domainExperience.update([], now);
+      energyExperience.update([], now);
+    }
   }
   if (!camera || !tracker) return;
 
@@ -327,7 +340,14 @@ function cameraTick(now) {
   state.detectErrors = 0;
 
   const mirroredHands = hands.map(mirrorHand);
-  if (state.energyEnabled) energyExperience.update(mirroredHands, now);
+  if (state.energyEnabled) {
+    const domainState = domainExperience.update(mirroredHands, now);
+    const energyHands = domainExperience.suppressEnergy() ? [] : mirroredHands;
+    energyExperience.update(energyHands, now);
+    if (domainState?.type === 'ready' || domainState?.type === 'activate') {
+      energyExperience.hideHint();
+    }
+  }
   const visibleHands = state.energyEnabled ? mirroredHands : mirroredHands.slice(0, 1);
   const best = chooseBestHand(visibleHands);
   if (state.energyEnabled) virtualHand.update(best, now);
@@ -414,6 +434,7 @@ function onResize() {
   energyExperience?.resize();
   virtualHand?.resize();
   cityBackground?.resize();
+  domainExperience?.resize();
   if (state.mode === 'camera' || state.mode === 'demo') syncEnergySkill();
 }
 
@@ -439,6 +460,7 @@ function cleanup() {
   energyExperience?.clear();
   virtualHand?.clear();
   cityBackground?.setEnabled(false);
+  domainExperience?.clear();
 }
 
 // ============================================================
@@ -504,6 +526,44 @@ function runDemo() {
   console.info('[demo] 骨骼状态窗与能量球演示已就绪');
 }
 
+function runDomainDemo() {
+  dom.gate.hidden = true;
+  document.body.classList.add('is-live');
+  state.mode = 'demo';
+  showPanel();
+  statusView.setBackend('DEMO');
+  statusView.setFps(30);
+
+  const left = makeHand('seal', [0.4, 0.52]);
+  const right = makeHand('seal', [0.6, 0.52]);
+  interpreter.update(left);
+  const gesture = interpreter.update(left);
+  gesture.score = 0.98;
+  gesture.pose = {
+    ...gesture.pose,
+    id: 'seal',
+    label: '结印',
+    detail: '双手五指指尖聚拢成印',
+  };
+  state.gesture = gesture;
+  statusView.update(gesture);
+  syncEnergySkill();
+  if (state.energyEnabled) {
+    const now = performance.now();
+    virtualHand.showDemo(left, now);
+    domainExperience.showDemo(now);
+    startLoop();
+  }
+  window.requestAnimationFrame(() => {
+    statusView.resize();
+    statusView.update(gesture);
+  });
+
+  document.body.dataset.demo = 'domain';
+  document.body.dataset.handCount = '2';
+  document.title = 'DOMAIN_DEMO_DONE';
+  console.info('[demo] 伏魔御厨子演示已就绪');
+}
 async function runSelfTest() {
   dom.gate.hidden = true;
   document.body.classList.add('is-live');
@@ -547,6 +607,9 @@ async function runSelfTest() {
   output.textContent = JSON.stringify(result, null, 2);
   console.info('[selftest]', result);
 }
+
+
+
 
 
 

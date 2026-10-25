@@ -147,12 +147,14 @@ body.is-live::before {
 
 .energy-canvas,
 .virtual-hand-canvas,
+.domain-canvas,
 .energy-hint {
   display: none;
 }
 
 .energy-canvas,
-.virtual-hand-canvas {
+.virtual-hand-canvas,
+.domain-canvas {
   position: fixed;
   inset: 0;
   width: 100vw;
@@ -167,6 +169,10 @@ body.is-live::before {
 
 .energy-canvas {
   z-index: 10;
+}
+
+.domain-canvas {
+  z-index: 11;
 }
 
 .energy-hint {
@@ -231,7 +237,8 @@ body.is-live::before {
 
 @media (min-width: 960px) and (min-height: 600px) {
   body.energy-enabled .virtual-hand-canvas:not([hidden]),
-  body.energy-enabled .energy-canvas:not([hidden]) {
+  body.energy-enabled .energy-canvas:not([hidden]),
+  body.energy-enabled .domain-canvas:not([hidden]) {
     display: block;
   }
 
@@ -926,6 +933,7 @@ kbd {
     transition-duration: 0.01s;
   }
 }
+
 
 
 

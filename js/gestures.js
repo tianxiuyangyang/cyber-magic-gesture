@@ -90,6 +90,19 @@ export function pinchRatio(points) {
   return dist(points[THUMB_TIP], points[INDEX_TIP]) / handScale(points);
 }
 
+/** 五指指尖聚拢程度：越小越接近“结印”。 */
+export function fingertipSpreadRatio(points) {
+  if (!Array.isArray(points) || points.length < 21) return Infinity;
+  const tips = [THUMB_TIP, INDEX_TIP, MIDDLE_TIP, RING_TIP, PINKY_TIP].map((index) => points[index]);
+  const center = [
+    tips.reduce((sum, point) => sum + point[0], 0) / tips.length,
+    tips.reduce((sum, point) => sum + point[1], 0) / tips.length,
+  ];
+  const spread = tips.reduce((sum, point) => (
+    sum + Math.hypot(point[0] - center[0], point[1] - center[1])
+  ), 0) / tips.length;
+  return spread / handScale(points);
+}
 /** 为状态窗生成稳定、可读的手势名称。 */
 export function classifyHandPose(points, pinching = false) {
   if (!Array.isArray(points) || points.length < 21) {
@@ -104,6 +117,9 @@ export function classifyHandPose(points, pinching = false) {
   const fingers = fingerStates(points);
   const base = { fingers };
 
+  if (fingertipSpreadRatio(points) < 0.25) {
+    return { ...base, id: 'seal', label: '结印', detail: '五指指尖聚拢，双手成印' };
+  }
   if (pinching) {
     return { ...base, id: 'pinch', label: '捏合', detail: '拇指与食指已闭合' };
   }
@@ -259,3 +275,4 @@ export class GestureInterpreter {
     return state;
   }
 }
+
