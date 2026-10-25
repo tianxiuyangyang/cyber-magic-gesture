@@ -137,6 +137,8 @@ web/
 - **等比适配**：计算手部包围盒并等比缩放到小窗，避免不同手型和远近导致骨架被裁切。
 - **隐私**：摄像头 `<video>` 只有 1px 且透明，只用于解码；不会绘制摄像头画面。
 - **性能**：只在检测到新视频帧时推理；状态窗 canvas 只在状态更新或窗口尺寸变化时重绘。
+- **线上加载**：GitHub Pages 上优先从 unpkg / jsDelivr 加载约 19MB 的 WASM 和模型，失败时自动回退到同源本地文件，避免 GitHub Pages 大文件下载过慢导致一直停在加载状态。
+- **离线加载**：localhost 或 `?cdn=0` 时直接使用 `web/` 内自带的 WASM 与模型。
 
 ---
 
@@ -148,7 +150,9 @@ web/
 | ?demo=domain | 不打开摄像头，直接演示伏魔御厨子与慢动作巨斩 |
 | `?selftest=1` | 初始化 MediaPipe 并在空白帧上跑一次推理，结果写到页面和标题 |
 | `?autostart=1` | 无点击直接启动摄像头，配合 Chrome 假摄像头做自动化验证 |
-| `?delegate=CPU` | 强制 CPU 推理（GPU 异常时排查用；默认 auto：GPU → CPU） |
+| ?delegate=CPU | 强制 CPU 推理（GPU 异常时排查用；默认 auto：GPU → CPU） |
+| ?cdn=1 | 强制从 CDN 加载 MediaPipe WASM 和模型 |
+| ?cdn=0 | 强制使用同源本地 WASM 和模型 |
 
 浏览器控制台调试句柄：
 
@@ -200,6 +204,7 @@ A：调整 `GESTURE.pinchStartRatio`：调小更难触发（如 `0.25`），调�
 
 **Q：端口 8765 被占用？**
 A：`web_server.py` 会自动往后找可用端口，终端里会打印实际地址。
+
 
 
 

@@ -11,6 +11,11 @@ import { mapLandmarkerResult } from './landmark-result.js';
 
 const WASM_PATH = new URL('../vendor/mediapipe/wasm', import.meta.url).href;
 const MODEL_PATH = new URL('../assets/hand_landmarker.task', import.meta.url).href;
+const CDN_WASM_PATHS = [
+  'https://unpkg.com/@mediapipe/tasks-vision@0.10.35/wasm',
+  'https://gcore.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/wasm',
+];
+const CDN_MODEL_PATH = 'https://gcore.jsdelivr.net/gh/tianxiuyangyang/cyber-magic-gesture@main/assets/hand_landmarker.task';
 
 const HAND_OPTIONS = {
   runningMode: 'VIDEO',
@@ -21,9 +26,10 @@ const HAND_OPTIONS = {
 };
 
 export class HandTracker {
-  constructor(landmarker, backend = 'GPU') {
+  constructor(landmarker, backend = 'GPU', assetSource = 'local') {
     this.landmarker = landmarker;
     this.backend = backend;
+    this.assetSource = assetSource;
     this.closed = false;
   }
 
@@ -32,27 +38,50 @@ export class HandTracker {
    * @param {{onProgress?: (text: string) => void, delegate?: 'auto'|'GPU'|'CPU', maxHands?: number}} options
    */
   static async create({ onProgress, delegate = 'auto', maxHands = 1 } = {}) {
-    onProgress?.('正在加载手势引擎…');
-    const fileset = await FilesetResolver.forVisionTasks(WASM_PATH);
+    const cdnParam = new URLSearchParams(window.location.search).get('cdn');
+    const online = cdnParam !== '0' && (
+      cdnParam === '1' || /(^|\.)github\.io$/i.test(window.location.hostname)
+    );
+    const wasmSources = online
+      ? [...CDN_WASM_PATHS.map((path) => ({ path, label: 'CDN' })), { path: WASM_PATH, label: '本地' }]
+      : [{ path: WASM_PATH, label: '本地' }];
+    const modelSources = online
+      ? [{ path: CDN_MODEL_PATH, label: 'CDN' }, { path: MODEL_PATH, label: '本地' }]
+      : [{ path: MODEL_PATH, label: '本地' }];
 
-    onProgress?.('正在加载手部模型…');
-    const requested = String(delegate || 'auto').toUpperCase();
-    const backends = requested === 'CPU' || requested === 'GPU' ? [requested] : ['GPU', 'CPU'];
+    let fileset = null;
+    let filesetSource = '';
     let lastError = null;
-
-    for (const backend of backends) {
+    for (const source of wasmSources) {
       try {
-        const landmarker = await HandLandmarker.createFromOptions(fileset, {
-          ...HAND_OPTIONS,
-          numHands: Math.max(1, Math.min(2, Number(maxHands) || 1)),
-          baseOptions: { modelAssetPath: MODEL_PATH, delegate: backend },
-        });
-        return new HandTracker(landmarker, backend);
+        onProgress?.(`正在加载手势引擎（${source.label}）…`);
+        fileset = await FilesetResolver.forVisionTasks(source.path);
+        filesetSource = source.label;
+        break;
       } catch (error) {
         lastError = error;
-        if (backend === 'GPU') {
-          console.warn('[手势] GPU 加速不可用，改用 CPU：', error);
-          onProgress?.('正在加载手部模型（CPU）…');
+        console.warn(`[手势] ${source.label} WASM 加载失败：`, error);
+      }
+    }
+    if (!fileset) throw lastError || new Error('手势引擎加载失败');
+
+    const requested = String(delegate || 'auto').toUpperCase();
+    const backends = requested === 'CPU' || requested === 'GPU' ? [requested] : ['GPU', 'CPU'];
+    for (const modelSource of modelSources) {
+      for (const backend of backends) {
+        try {
+          onProgress?.(`正在加载手部模型（${modelSource.label} / ${backend}）…`);
+          const landmarker = await HandLandmarker.createFromOptions(fileset, {
+            ...HAND_OPTIONS,
+            numHands: Math.max(1, Math.min(2, Number(maxHands) || 1)),
+            baseOptions: { modelAssetPath: modelSource.path, delegate: backend },
+          });
+          const source = modelSource.label === 'CDN' || filesetSource === 'CDN' ? 'CDN' : '本地';
+          return new HandTracker(landmarker, backend, source);
+        } catch (error) {
+          lastError = error;
+          console.warn(`[手势] ${modelSource.label} / ${backend} 初始化失败：`, error);
+          if (backend === 'GPU') onProgress?.('GPU 不可用，正在尝试 CPU…');
         }
       }
     }
@@ -193,4 +222,7 @@ export function describeError(error) {
   }
   return `启动失败：${message || name || '未知错误'}`;
 }
+
+
+
 
