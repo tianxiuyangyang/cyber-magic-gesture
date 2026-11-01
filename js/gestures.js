@@ -176,6 +176,40 @@ export function mirrorPoints(points) {
   return points.map(([x, y]) => [1 - x, y]);
 }
 
+/**
+ * 把摄像头画面等比铺满屏幕（cover）：不拉伸、不留边，
+ * 多出来的部分在上下/左右裁掉。4:3 摄像头在 16:9 屏幕上不会被横向拉长。
+ * 返回 [x, y, width, height]（屏幕像素）。
+ */
+export function coverViewport(sourceWidth, sourceHeight, targetWidth, targetHeight) {
+  if (!(sourceWidth > 0 && sourceHeight > 0)) {
+    return [0, 0, targetWidth, targetHeight];
+  }
+  const scale = Math.max(targetWidth / sourceWidth, targetHeight / sourceHeight);
+  const width = sourceWidth * scale;
+  const height = sourceHeight * scale;
+  return [(targetWidth - width) * 0.5, (targetHeight - height) * 0.5, width, height];
+}
+
+/** 支持 [w, h] / [x, y, w, h] / {x, y, width, height} 三种写法。 */
+function viewportRect(viewport) {
+  if (Array.isArray(viewport)) {
+    if (viewport.length === 4) {
+      return { x: viewport[0], y: viewport[1], width: viewport[2], height: viewport[3] };
+    }
+    return { x: 0, y: 0, width: viewport[0], height: viewport[1] };
+  }
+  if (viewport && typeof viewport === 'object') {
+    return {
+      x: Number(viewport.x) || 0,
+      y: Number(viewport.y) || 0,
+      width: Number(viewport.width ?? viewport.w) || 0,
+      height: Number(viewport.height ?? viewport.h) || 0,
+    };
+  }
+  return null;
+}
+
 /** 手部骨架状态机：只判断手势，不触发绘画。 */
 export class GestureInterpreter {
   constructor(options = {}) {
@@ -195,9 +229,12 @@ export class GestureInterpreter {
 
   /**
    * @param {object|null} hand 归一化手部关键点
-   * @returns {{present: boolean, landmarks: number[][]|null, pose: object}}
+   * @param {number[]|object} [viewport] 手部坐标映射到的屏幕区域（屏幕像素）。
+   *        不传时只输出归一化坐标（骨架/分类用）。
+   * @returns {{present: boolean, landmarks: number[][]|null, pose: object,
+   *           indexTip?: number[]|null, pinchPoint?: number[]|null, cursor?: number[]|null}}
    */
-  update(hand) {
+  update(hand, viewport) {
     const state = {
       present: false,
       label: '',
@@ -208,6 +245,9 @@ export class GestureInterpreter {
       pointing: false,
       pinchStarted: false,
       pinchEnded: false,
+      indexTip: null,
+      pinchPoint: null,
+      cursor: null,
       pose: classifyHandPose(null),
     };
 
@@ -272,6 +312,20 @@ export class GestureInterpreter {
     state.pinch = this.pinch;
     state.pointing = this.pointing;
     state.pose = pose;
+
+    // 屏幕坐标：指尖 / 捏合中点，供粒子场的吸引与推开使用
+    const rect = viewportRect(viewport);
+    if (rect && rect.width > 0 && rect.height > 0) {
+      state.indexTip = [
+        rect.x + points[INDEX_TIP][0] * rect.width,
+        rect.y + points[INDEX_TIP][1] * rect.height,
+      ];
+      state.pinchPoint = [
+        rect.x + ((points[THUMB_TIP][0] + points[INDEX_TIP][0]) * 0.5) * rect.width,
+        rect.y + ((points[THUMB_TIP][1] + points[INDEX_TIP][1]) * 0.5) * rect.height,
+      ];
+      state.cursor = this.pinch ? state.pinchPoint : state.indexTip;
+    }
     return state;
   }
 }

@@ -4,17 +4,19 @@
  *     cd web
  *     node --test tests/logic.test.mjs
  *
- * 覆盖：手指状态、手势分类、捏合滞回、21 点状态机、
- * MediaPipe 字段映射、镜像、骨架适配和脚本动作。
+ * 覆盖：手势分类、捏合滞回、屏幕坐标映射、cover 裁切、
+ * MediaPipe 字段映射、镜像、脚本动作，以及粒子场的物理：
+ * 自由漂移、捏合吸引、核心排斥、挣脱冲动、指尖推开、限速。
  */
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { GESTURE } from '../js/config.js';
+import { FIELD, GESTURE } from '../js/config.js';
 import {
   GestureInterpreter,
   classifyHandPose,
+  coverViewport,
   fingerStates,
   isPointing,
   mirrorPoints,
@@ -22,10 +24,29 @@ import {
 } from '../js/gestures.js';
 import { buildScriptedHands, makeHand } from '../js/scripted-hand.js';
 import { mapLandmarkerResult } from '../js/landmark-result.js';
-import { fitLandmarks } from '../js/hand-status.js';
-import { EnergySkill, analyzeEnergyGesture } from '../js/energy-skill.js';
-import { projectNormalizedPoint } from '../js/screen-projection.js';
-import { analyzeDomainSeal, DomainSkill } from '../js/domain-skill.js';
+import { createParticle, pickColor, stepParticle } from '../js/particles.js';
+
+/** 可复现的伪随机源。 */
+function seeded(seed) {
+  let s = seed >>> 0;
+  return () => {
+    s = (s * 1664525 + 1013904223) >>> 0;
+    return s / 4294967296;
+  };
+}
+
+const ATTRACTOR = {
+  x: 900,
+  y: 500,
+  strength: 1,
+  sigma: 800,
+  coreRadius: FIELD.coreRadius,
+  escapeReach: 500,
+};
+
+// ============================================================
+// 手势
+// ============================================================
 
 test('五根手指伸展状态与常见手势分类', () => {
   const point = makeHand('point', [0.6, 0.5]);
@@ -128,6 +149,45 @@ test('镜像后的骨架仍然可以识别手势', () => {
   assert.equal(classifyHandPose(mirrored).id, 'point');
 });
 
+test('摄像头画面按 cover 铺满屏幕（不拉伸）', () => {
+  const [x, y, width, height] = coverViewport(640, 480, 1920, 1080);
+  assert.equal(x, 0, '4:3 画面铺满 16:9 时横向刚好');
+  assert.ok(Math.abs(y + 180) < 1e-9, '上下各裁掉 180px');
+  assert.equal(width, 1920);
+  assert.equal(height, 1440);
+  assert.ok(Math.abs(width / 640 - height / 480) < 1e-9, '横纵缩放比例一致，不会变形');
+
+  const [x2, y2, width2, height2] = coverViewport(1280, 720, 1920, 1080);
+  assert.equal(x2, 0);
+  assert.equal(y2, 0);
+  assert.equal(width2, 1920);
+  assert.equal(height2, 1080);
+
+  const [x3, , width3, height3] = coverViewport(640, 480, 500, 1000);
+  assert.ok(x3 < 0, '竖屏时左右需要裁切');
+  assert.ok(Math.abs(height3 - 1000) < 1e-9);
+  assert.ok(Math.abs(width3 - 1333.3333333333) < 1e-6);
+});
+
+test('手部屏幕坐标映射：指尖 / 捏合中点 / 光标', () => {
+  const viewport = coverViewport(640, 480, 1920, 1080);
+  const interp = new GestureInterpreter();
+  const state = interp.update(makeHand('point', [0.5, 0.5]), viewport);
+  assert.ok(Math.abs(state.indexTip[0] - 960) < 1e-6);
+  assert.ok(Math.abs(state.indexTip[1] - 540) < 1e-6);
+  assert.deepEqual(state.cursor, state.indexTip, '指向时光标在指尖');
+
+  const interp2 = new GestureInterpreter();
+  const pinching = makeHand('pinch', [0.5, 0.5]);
+  let pinchState = interp2.update(pinching, [1280, 720]);
+  for (let i = 0; i < 7 && !pinchState.pinch; i += 1) {
+    pinchState = interp2.update(pinching, [1280, 720]);
+  }
+  assert.ok(pinchState.pinch);
+  assert.deepEqual(pinchState.pinchPoint, [640, 360], '捏合中点是拇指尖与食指尖的中点');
+  assert.deepEqual(pinchState.cursor, pinchState.pinchPoint, '捏合时光标在捏合点');
+});
+
 test('MediaPipe 结果字段映射（landmarks / handednesses）', () => {
   const points = Array.from({ length: 21 }, (_, index) => ({
     x: index / 20,
@@ -158,21 +218,6 @@ test('MediaPipe 结果字段映射（landmarks / handednesses）', () => {
   assert.deepEqual(mapLandmarkerResult({}), []);
 });
 
-test('骨架等比适配到右上角小窗并保持居中', () => {
-  const points = [[0.25, 0.25], [0.75, 0.75], [0.5, 0.1]];
-  const fitted = fitLandmarks(points, 280, 166, 18);
-  assert.equal(fitted.length, 3);
-
-  const xs = fitted.map(([x]) => x);
-  const ys = fitted.map(([, y]) => y);
-  assert.ok(Math.min(...xs) >= 18 - 1e-6);
-  assert.ok(Math.max(...xs) <= 262 + 1e-6);
-  assert.ok(Math.min(...ys) >= 18 - 1e-6);
-  assert.ok(Math.max(...ys) <= 148 + 1e-6);
-  assert.ok(Math.abs((Math.min(...xs) + Math.max(...xs)) / 2 - 140) < 1e-6);
-  assert.ok(Math.abs((Math.min(...ys) + Math.max(...ys)) / 2 - 83) < 1e-6);
-});
-
 test('脚本动作包含单指与捏合状态', () => {
   const interp = new GestureInterpreter();
   let pointingFrames = 0;
@@ -188,120 +233,134 @@ test('脚本动作包含单指与捏合状态', () => {
   assert.ok(pinchFrames > 30, `应有足够捏合帧（实际 ${pinchFrames}）`);
 });
 
+// ============================================================
+// 粒子场物理
+// ============================================================
 
-test('能量技能：只有拇指食指捏合才触发', () => {
-  const pinch = makeHand('pinch', [0.5, 0.55]);
-  const active = analyzeEnergyGesture([pinch]);
-  assert.ok(active.active);
-  assert.equal(active.mode, 'pinch');
-  assert.ok(active.point[0] > 0.3 && active.point[0] < 0.7);
+test('粒子创建：落在画面内，颜色来自调色板', () => {
+  const rand = seeded(11);
+  const p = createParticle(1920, 1080, rand);
+  assert.ok(p.x >= 0 && p.x <= 1920);
+  assert.ok(p.y >= 0 && p.y <= 1080);
+  assert.ok(p.size > 0 && p.alpha > 0 && p.alpha <= 1);
+  assert.ok(p.depth >= 0.3 && p.depth <= 1, '粒子应有远近层次');
+  assert.equal(p.flash, 0);
+  assert.equal(typeof p.glint, 'boolean');
 
-  const peace = makeHand('peace', [0.5, 0.55]);
-  const open = makeHand('open', [0.5, 0.55]);
-  const point = makeHand('point', [0.5, 0.55]);
-  const left = makeHand('open', [0.36, 0.55]);
-  const right = makeHand('open', [0.64, 0.55]);
-  assert.equal(analyzeEnergyGesture([peace]).active, false);
-  assert.equal(analyzeEnergyGesture([open]).active, false);
-  assert.equal(analyzeEnergyGesture([point]).active, false);
-  assert.equal(analyzeEnergyGesture([left, right]).active, false);
-});
-test('能量技能：蓄能后快速前推触发发射', () => {
-  const skill = new EnergySkill({ holdMs: 80, chargeMs: 300, fireThreshold: 1 });
-  const hand = makeHand('pinch', [0.5, 0.56]);
-  hand.z = 0;
-
-  let event = skill.update([hand], 1000);
-  assert.equal(event.type, 'charge');
-  assert.equal(event.visible, false);
-
-  event = skill.update([hand], 1200);
-  assert.equal(event.type, 'charge');
-  assert.ok(event.visible, '稳定手势后能量球应显示');
-  assert.ok(event.charge > 0);
-
-  const pushed = makeHand('pinch', [0.5, 0.56], 0.48);
-  pushed.z = -0.08;
-  event = skill.update([pushed], 1235);
-  assert.equal(event.type, 'fire');
-  assert.equal(event.point.length >= 2, true);
-  assert.ok(event.power >= 0.7);
-  assert.equal(event.fireType, 'city');
+  const colors = new Set();
+  for (let i = 0; i < 200; i += 1) {
+    const color = pickColor(rand);
+    colors.add(color.join(','));
+    assert.ok(
+      FIELD.palette.some((item) => item.color.join(',') === color.join(',')),
+      '颜色必须来自调色板',
+    );
+  }
+  assert.ok(colors.size >= 2, '调色板应按权重出现多种颜色');
 });
 
-test('能量技能：握拳不会误触发', () => {
-  const fist = makeHand('fist', [0.5, 0.5]);
-  const analysis = analyzeEnergyGesture([fist]);
-  assert.equal(analysis.active, false);
+test('粒子自由漂移：没有力场也在动（它们想自由）', () => {
+  const p = createParticle(1000, 800, seeded(2));
+  p.vx = 0;
+  p.vy = 0;
+  const x0 = p.x;
+  const y0 = p.y;
+  for (let i = 0; i < 30; i += 1) {
+    stepParticle(p, {}, 1 / 60, FIELD, () => 0.5);
+  }
+  assert.ok(
+    Math.hypot(p.x - x0, p.y - y0) > 0.01,
+    '自由漂移应让粒子移动',
+  );
 });
 
-
-
-test('虚拟手投影保持摄像头比例且中心对齐', () => {
-  const center = projectNormalizedPoint([0.5, 0.5], 1440, 900);
-  assert.deepEqual(center, [720, 450]);
-
-  const dx = projectNormalizedPoint([0.6, 0.5], 1440, 900);
-  const dy = projectNormalizedPoint([0.5, 0.6], 1440, 900);
-  const horizontal = Math.hypot(dx[0] - center[0], dx[1] - center[1]);
-  const vertical = Math.hypot(dy[0] - center[0], dy[1] - center[1]);
-  assert.ok(Math.abs(horizontal / vertical - 4 / 3) < 1e-9, '虚拟手不应被横向拉伸');
-});
-test('能量技能：弹开手指会射向城市并爆炸', () => {
-  const skill = new EnergySkill({ holdMs: 80, chargeMs: 300, fireThreshold: 1 });
-  const pinch = makeHand('pinch', [0.5, 0.56]);
-  pinch.z = 0;
-
-  skill.update([pinch], 1000);
-  const charged = skill.update([pinch], 1200);
-  assert.ok(charged.visible);
-
-  const snapped = makeHand('open', [0.5, 0.56]);
-  let event = skill.update([snapped], 1270);
-  assert.equal(event.type, 'fire', '捏合张开应触发弹指发射');
-  assert.equal(event.fireType, 'city');
-  assert.equal(event.power, 1);
-
-  skill.update([pinch], 2200);
-  event = skill.update([pinch], 2500);
-  assert.ok(event.visible);
-  const flicked = {
-    points: pinch.points.map((point) => [...point]),
-    label: pinch.label,
-    score: pinch.score,
-    z: 0,
-  };
-  flicked.points[12] = [flicked.points[12][0] + 0.16, flicked.points[12][1] - 0.1];
-  event = skill.update([flicked], 2530);
-  assert.equal(event.type, 'fire', '捏合中快速弹指也应发射');
-});
-test('伏魔御厨子：必须双手五指聚拢成印', () => {
-  const left = makeHand('seal', [0.38, 0.55]);
-  const right = makeHand('seal', [0.62, 0.55]);
-  const seal = analyzeDomainSeal([left, right]);
-  assert.ok(seal.active);
-  assert.ok(seal.spread < 0.5);
-  assert.equal(analyzeDomainSeal([left]).active, false);
-  assert.equal(analyzeDomainSeal([makeHand('open', [0.38, 0.55]), right]).active, false);
+test('捏合吸引：远处的粒子会朝捏合点加速', () => {
+  const p = createParticle(1000, 800, seeded(3));
+  p.x = 100;
+  p.y = 100;
+  p.vx = 0;
+  p.vy = 0;
+  p.homeX = 100;
+  p.homeY = 100;
+  const x0 = p.x;
+  for (let i = 0; i < 60; i += 1) {
+    stepParticle(p, { attractor: ATTRACTOR }, 1 / 60, FIELD, () => 0.5);
+  }
+  assert.ok(p.x > x0 + 1, `被吸引的粒子应朝捏合点移动（Δx=${(p.x - x0).toFixed(1)}）`);
+  assert.ok(p.vx > 0, '速度应指向捏合点方向');
 });
 
-test('伏魔御厨子：结印启动后进入 5 秒斩击与终结阶段', () => {
-  const skill = new DomainSkill({ holdMs: 100, barrageMs: 5000, finalMs: 2500, cooldownMs: 12000 });
-  const left = makeHand('seal', [0.38, 0.55]);
-  const right = makeHand('seal', [0.62, 0.55]);
-
-  let event = skill.update([left, right], 1000);
-  assert.equal(event.type, 'ready');
-  event = skill.update([left, right], 1100);
-  assert.equal(event.type, 'activate');
-
-  event = skill.update([left, right], 3000);
-  assert.equal(event.type, 'barrage');
-  event = skill.update([left, right], 6300);
-  assert.equal(event.type, 'final');
-  assert.ok(event.progress > 0 && event.progress < 1);
-  event = skill.update([left, right], 8700);
-  assert.equal(event.type, 'done');
+test('核心排斥：靠近捏合点会被顶开，不会塌成一个点', () => {
+  const p = createParticle(1000, 800, seeded(4));
+  p.x = ATTRACTOR.x + 10;
+  p.y = ATTRACTOR.y;
+  p.vx = 0;
+  p.vy = 0;
+  p.homeX = p.x;
+  p.homeY = p.y;
+  p.escapeUrge = 0.4;
+  for (let i = 0; i < 30; i += 1) {
+    stepParticle(p, { attractor: ATTRACTOR }, 1 / 60, FIELD, () => 0.5);
+  }
+  const d = Math.hypot(p.x - ATTRACTOR.x, p.y - ATTRACTOR.y);
+  assert.ok(d > 12, `核心排斥应把粒子顶开（d=${d.toFixed(1)}）`);
 });
 
+test('挣脱冲动：捏合时积累，松开后消退', () => {
+  const p = createParticle(1000, 800, seeded(5));
+  p.x = ATTRACTOR.x - 200;
+  p.y = ATTRACTOR.y;
+  p.vx = 0;
+  p.vy = 0;
+  p.escapeUrge = 0;
 
+  stepParticle(p, { attractor: ATTRACTOR }, 0.5, FIELD, () => 0.5);
+  const urge = p.escapeUrge;
+  assert.ok(urge > 0, `捏合期间挣脱冲动应积累（urge=${urge.toFixed(3)}）`);
+
+  stepParticle(p, {}, 0.5, FIELD, () => 0.5);
+  assert.ok(p.escapeUrge < urge, '松开后挣脱冲动应消退');
+});
+
+test('挣脱冲量会点亮粒子，随后重新暗下去', () => {
+  const p = createParticle(1000, 800, seeded(8));
+  p.x = ATTRACTOR.x - 120;
+  p.y = ATTRACTOR.y;
+  p.vx = 0;
+  p.vy = 0;
+  p.escapeTimer = 0;
+  stepParticle(p, { attractor: ATTRACTOR }, 1 / 60, FIELD, () => 0.5);
+  assert.ok(p.flash > 0.9, `挣脱瞬间应被点亮（flash=${p.flash.toFixed(2)}）`);
+
+  for (let i = 0; i < 60; i += 1) {
+    stepParticle(p, {}, 1 / 60, FIELD, () => 0.5);
+  }
+  assert.equal(p.flash, 0, '离开捏合后闪光应完全熄灭');
+});
+
+test('指尖推开：力场半径内的粒子被推远', () => {
+  const p = createParticle(1000, 800, seeded(6));
+  p.x = 560;
+  p.y = 400;
+  p.vx = 0;
+  p.vy = 0;
+  p.homeX = 560;
+  p.homeY = 400;
+  const repulsor = { x: 500, y: 400, strength: 1 };
+  for (let i = 0; i < 20; i += 1) {
+    stepParticle(p, { repulsor }, 1 / 60, FIELD, () => 0.5);
+  }
+  assert.ok(p.x > 560 + 1, `指尖附近的粒子应被推开（Δx=${(p.x - 560).toFixed(1)}）`);
+  assert.ok(Math.abs(p.y - 400) < 60, '推力以径向为主，不应大幅偏移');
+});
+
+test('粒子速度不会超过上限', () => {
+  const p = createParticle(1000, 800, seeded(7));
+  p.vx = 50000;
+  p.vy = -50000;
+  stepParticle(p, {}, 1 / 60, FIELD, () => 0.5);
+  assert.ok(
+    Math.hypot(p.vx, p.vy) <= FIELD.maxSpeed + 1e-6,
+    '速度应被限制在 maxSpeed 内',
+  );
+});
