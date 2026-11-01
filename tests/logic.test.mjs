@@ -24,6 +24,7 @@ import {
 } from '../js/gestures.js';
 import { buildScriptedHands, makeHand } from '../js/scripted-hand.js';
 import { mapLandmarkerResult } from '../js/landmark-result.js';
+import { fitLandmarks, skeletonScale } from '../js/hand-status.js';
 import { createParticle, pickColor, stepParticle } from '../js/particles.js';
 
 /** 可复现的伪随机源。 */
@@ -216,6 +217,33 @@ test('MediaPipe 结果字段映射（landmarks / handednesses）', () => {
 
   assert.deepEqual(mapLandmarkerResult(null), []);
   assert.deepEqual(mapLandmarkerResult({}), []);
+});
+
+test('外骨骼小窗适配：等比缩放且留出边距', () => {
+  const fitted = fitLandmarks([[0.2, 0.3], [0.8, 0.7], [0.5, 0.5]], 280, 166, 18);
+  assert.equal(fitted.length, 3);
+  const xs = fitted.map(([x]) => x);
+  const ys = fitted.map(([, y]) => y);
+  assert.ok(Math.min(...xs) >= 18 && Math.max(...xs) <= 280 - 18);
+  assert.ok(Math.min(...ys) >= 18 && Math.max(...ys) <= 166 - 18);
+  const spanX = Math.max(...xs) - Math.min(...xs);
+  const spanY = Math.max(...ys) - Math.min(...ys);
+  assert.ok(Math.abs(spanX / 0.6 - spanY / 0.4) < 1e-6, '横纵缩放比例一致');
+  assert.deepEqual(fitLandmarks([], 280, 166, 18), []);
+});
+
+test('外骨骼骨架能把 21 点全部放进小窗', () => {
+  const hand = makeHand('pinch', [0.5, 0.5]);
+  const fitted = fitLandmarks(hand.points, 310, 166, 18);
+  assert.equal(fitted.length, 21);
+  assert.ok(fitted.every(([x, y]) => x >= 18 && x <= 310 - 18 && y >= 18 && y <= 166 - 18));
+});
+
+test('外骨骼显示框放大 3 倍时骨架线宽同步放大', () => {
+  assert.equal(skeletonScale(282, 166), 1);
+  assert.equal(skeletonScale(882, 498), 3);
+  assert.equal(skeletonScale(930, 498), 3);
+  assert.equal(skeletonScale(2000, 1000), 4);
 });
 
 test('脚本动作包含单指与捏合状态', () => {

@@ -65,6 +65,63 @@
     </div>
   </section>
 
+  <!-- 外骨骼面板：只在按住空格时显示 -->
+  <aside id="hand-panel" class="hand-panel" hidden aria-hidden="true" aria-label="手势骨骼状态">
+    <header class="panel-head">
+      <div class="panel-title">
+        <span class="live-dot" aria-hidden="true"></span>
+        <span>HAND TRACKING</span>
+      </div>
+      <div class="panel-runtime">
+        <span id="tracker-backend">INIT</span>
+        <span class="runtime-divider" aria-hidden="true"></span>
+        <span id="hand-fps">-- FPS</span>
+      </div>
+    </header>
+
+    <div id="skeleton-stage" class="skeleton-stage is-empty" data-pose="none">
+      <canvas id="hand-skeleton" aria-label="手部 21 点骨骼图"></canvas>
+      <div id="hand-empty" class="hand-empty">
+        <span class="empty-icon" aria-hidden="true"></span>
+        <span>等待手部进入画面</span>
+      </div>
+      <div class="stage-caption" aria-hidden="true">
+        <span>21 PT</span>
+        <span id="hand-side">--</span>
+      </div>
+    </div>
+
+    <div class="hand-summary">
+      <div class="summary-copy">
+        <span class="summary-kicker">当前手势</span>
+        <strong id="hand-gesture" class="gesture-name">等待识别</strong>
+      </div>
+      <div class="confidence">
+        <span>置信度</span>
+        <strong id="hand-score">--</strong>
+      </div>
+    </div>
+
+    <div id="finger-row" class="finger-row" aria-label="手指伸展状态">
+      <span data-finger="thumb"><i aria-hidden="true"></i>拇指</span>
+      <span data-finger="index"><i aria-hidden="true"></i>食指</span>
+      <span data-finger="middle"><i aria-hidden="true"></i>中指</span>
+      <span data-finger="ring"><i aria-hidden="true"></i>无名指</span>
+      <span data-finger="pinky"><i aria-hidden="true"></i>小指</span>
+    </div>
+
+    <footer class="panel-foot">
+      <span id="hand-message">把手放进摄像头画面</span>
+      <span id="hand-points">0 / 21</span>
+    </footer>
+  </aside>
+
+  <!-- 鼠标移动时出现在右下角的提示 -->
+  <div id="space-hint" class="space-hint" hidden aria-hidden="true">
+    <span class="space-hint-key" aria-hidden="true">SPACE</span>
+    <span>按空格显示外骨骼</span>
+  </div>
+
   <!-- 调试用摄像头预览：仅 ?preview=1 打开 -->
   <div id="preview" class="preview" hidden aria-hidden="true">
     <canvas id="preview-canvas"></canvas>

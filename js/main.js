@@ -22,6 +22,7 @@ import {
   HAND_CONNECTIONS,
 } from './gestures.js';
 import { ParticleSystem } from './particles.js';
+import { HandStatusView } from './hand-status.js';
 import { demoHandAt } from './demo.js';
 
 const TAU = Math.PI * 2;
@@ -55,6 +56,16 @@ const state = {
   // 演示
   demoStart: 0,
 
+  // 外骨骼面板 / 空格提示
+  panelVisible: false,
+  panelHideTimer: 0,
+  hintVisible: false,
+  hintTimer: 0,
+  hintHideTimer: 0,
+  fps: 0,
+  fpsCount: 0,
+  fpsSince: 0,
+
   // 调试（仅 URL 参数打开）
   preview: false,
 
@@ -63,6 +74,7 @@ const state = {
 
 let interpreter = null;
 let system = null;
+let statusView = null;
 let tracker = null;
 let camera = null;
 let trackerModule = null;
@@ -88,12 +100,37 @@ function boot() {
   dom.preview = document.getElementById('preview');
   dom.previewCanvas = document.getElementById('preview-canvas');
   dom.previewStatus = document.getElementById('preview-status');
+  dom.panel = document.getElementById('hand-panel');
+  dom.stage = document.getElementById('skeleton-stage');
+  dom.skeleton = document.getElementById('hand-skeleton');
+  dom.backend = document.getElementById('tracker-backend');
+  dom.fps = document.getElementById('hand-fps');
+  dom.handSide = document.getElementById('hand-side');
+  dom.handGesture = document.getElementById('hand-gesture');
+  dom.handScore = document.getElementById('hand-score');
+  dom.message = document.getElementById('hand-message');
+  dom.points = document.getElementById('hand-points');
+  dom.fingerRow = document.getElementById('finger-row');
+  dom.hint = document.getElementById('space-hint');
 
   if (!dom.board || !dom.start) return;
 
   interpreter = new GestureInterpreter(GESTURE);
   system = new ParticleSystem(dom.board);
   system.resize(window.innerWidth, window.innerHeight, deviceScale());
+  statusView = new HandStatusView({
+    panel: dom.panel,
+    stage: dom.stage,
+    canvas: dom.skeleton,
+    backend: dom.backend,
+    fps: dom.fps,
+    side: dom.handSide,
+    gesture: dom.handGesture,
+    score: dom.handScore,
+    message: dom.message,
+    points: dom.points,
+    fingerRow: dom.fingerRow,
+  });
 
   window.__cyberMagic = {
     get state() {
@@ -192,6 +229,7 @@ async function enterCamera() {
     sessionReady = true;
     state.mode = 'camera';
     resetSession();
+    statusView.setBackend(tracker.backend || 'AUTO');
     document.body.dataset.camera = 'live';
     document.body.dataset.videoSize = `${camera.video.videoWidth}x${camera.video.videoHeight}`;
     document.body.dataset.mirror = String(state.mirror);
@@ -223,6 +261,7 @@ async function resumeField() {
   await requestFullscreen();
   resetSession();
   state.mode = 'camera';
+  statusView.setBackend(tracker?.backend || 'AUTO');
   document.body.dataset.camera = 'live';
   setStatus('');
   hideGate();
@@ -244,6 +283,17 @@ function resetSession() {
   state.repulsorPos = null;
   state.cursorPos = null;
   state.cursorAlpha = 0;
+  state.panelVisible = false;
+  state.fps = 0;
+  state.fpsCount = 0;
+  state.fpsSince = 0;
+  window.clearTimeout(state.panelHideTimer);
+  dom.panel?.classList.remove('is-visible');
+  dom.panel?.setAttribute('aria-hidden', 'true');
+  if (dom.panel) dom.panel.hidden = true;
+  statusView?.setFps(0);
+  statusView?.update(null);
+  hideHint(true);
 }
 
 function hideGate() {
@@ -290,6 +340,12 @@ function showMenu(message) {
   system.setAttractor(null);
   system.setRepulsor(null);
   dom.preview.hidden = true;
+  state.panelVisible = false;
+  window.clearTimeout(state.panelHideTimer);
+  dom.panel?.classList.remove('is-visible');
+  dom.panel?.setAttribute('aria-hidden', 'true');
+  if (dom.panel) dom.panel.hidden = true;
+  hideHint(true);
 
   document.body.classList.remove('is-live');
   dom.gate.hidden = false;
@@ -388,6 +444,7 @@ function cameraTick(now) {
   // 摄像头断流/推理停更时，力场自然松开，粒子回归自由
   if (state.gesture?.present && now - state.lastDetectionAt > 900) {
     applyGesture(interpreter.update(null, viewport));
+    if (state.panelVisible) statusView.update(state.gesture);
   }
   if (!camera || !tracker) return;
 
@@ -407,9 +464,21 @@ function cameraTick(now) {
   state.detectErrors = 0;
 
   const hand = hands.length > 0 ? mirrorHand(hands[0]) : null;
-  applyGesture(interpreter.update(hand, viewport));
+  const gesture = interpreter.update(hand, viewport);
+  applyGesture(gesture);
   state.detections += 1;
   state.lastDetectionAt = now;
+
+  // 面板可见时才画骨架，避免不必要的开销
+  state.fpsCount += 1;
+  if (!state.fpsSince) state.fpsSince = now;
+  if (now - state.fpsSince >= 600) {
+    state.fps = (state.fpsCount * 1000) / (now - state.fpsSince);
+    state.fpsCount = 0;
+    state.fpsSince = now;
+    if (state.panelVisible) statusView.setFps(state.fps);
+  }
+  if (state.panelVisible) statusView.update(gesture);
 }
 
 function mirrorHand(hand) {
@@ -574,10 +643,24 @@ function drawGestureCursor(now) {
 
 function bindInput() {
   window.addEventListener('keydown', onKeyDown);
+  window.addEventListener('mousemove', onMouseMove, { passive: true });
 }
 
 function onKeyDown(event) {
   if (event.ctrlKey || event.metaKey || event.altKey || event.isComposing) return;
+
+  // 按一下空格持续显示外骨骼，再按一下收起；主界面里空格没有面板可显示
+  if (event.code === 'Space') {
+    if (state.mode === 'gate') {
+      event.preventDefault();
+      return;
+    }
+    if (state.mode !== 'camera' && state.mode !== 'demo') return;
+    event.preventDefault();
+    if (event.repeat) return;
+    togglePanel();
+    return;
+  }
 
   if (event.code === 'Escape') {
     if (state.mode === 'camera' || state.mode === 'demo') {
@@ -592,6 +675,72 @@ function onKeyDown(event) {
   }
 }
 
+function onMouseMove() {
+  if (state.mode !== 'camera' && state.mode !== 'demo') return;
+  if (state.panelVisible) return;
+  showHint();
+}
+
+/** 空格切换：按一下持续显示，再按一下收起。 */
+function togglePanel() {
+  if (state.panelVisible) hidePanel();
+  else showPanel();
+}
+
+function showPanel() {
+  if (state.mode !== 'camera' && state.mode !== 'demo') return;
+  hideHint();
+  state.panelVisible = true;
+  window.clearTimeout(state.panelHideTimer);
+  dom.panel.hidden = false;
+  dom.panel.setAttribute('aria-hidden', 'false');
+  window.requestAnimationFrame(() => {
+    if (!state.panelVisible) return;
+    dom.panel.classList.add('is-visible');
+    statusView.resize();
+    statusView.update(state.gesture || null);
+    statusView.setFps(state.mode === 'demo' ? 30 : state.fps);
+  });
+}
+
+function hidePanel() {
+  state.panelVisible = false;
+  dom.panel.classList.remove('is-visible');
+  dom.panel.setAttribute('aria-hidden', 'true');
+  window.clearTimeout(state.panelHideTimer);
+  state.panelHideTimer = window.setTimeout(() => {
+    if (!state.panelVisible) dom.panel.hidden = true;
+  }, 350);
+}
+
+function showHint() {
+  window.clearTimeout(state.hintTimer);
+  window.clearTimeout(state.hintHideTimer);
+  if (!state.hintVisible) {
+    state.hintVisible = true;
+    dom.hint.hidden = false;
+    window.requestAnimationFrame(() => {
+      if (state.hintVisible) dom.hint.classList.add('is-visible');
+    });
+  }
+  state.hintTimer = window.setTimeout(() => hideHint(), 2400);
+}
+
+function hideHint(immediate = false) {
+  window.clearTimeout(state.hintTimer);
+  window.clearTimeout(state.hintHideTimer);
+  state.hintVisible = false;
+  dom.hint?.classList.remove('is-visible');
+  if (!dom.hint) return;
+  if (immediate) {
+    dom.hint.hidden = true;
+    return;
+  }
+  state.hintHideTimer = window.setTimeout(() => {
+    if (!state.hintVisible) dom.hint.hidden = true;
+  }, 320);
+}
+
 function bindWindow() {
   window.addEventListener('resize', onResize);
   window.addEventListener('orientationchange', onResize);
@@ -604,6 +753,7 @@ function bindWindow() {
 function onResize() {
   if (!system) return;
   system.resize(window.innerWidth, window.innerHeight, deviceScale());
+  if (state.panelVisible) statusView.resize();
 }
 
 /** 浏览器用 ESC 退出全屏时不一定把按键传给页面，这里兜底回菜单。 */
@@ -623,6 +773,7 @@ function onWindowBlur() {
   // 切走窗口时松开力场，避免回来时残留一个聚拢核心
   state.pinchTarget = 0;
   state.pushTarget = 0;
+  hideHint(true);
 }
 
 function cleanup() {
@@ -749,13 +900,20 @@ function runDemo() {
   state.mode = 'demo';
   state.demoStart = performance.now();
   document.body.dataset.demo = 'running';
+  statusView.setBackend('DEMO');
+  statusView.setFps(30);
   startLoop();
 }
 
 function demoTick(now) {
   const elapsed = (now - state.demoStart) / 1000;
   const hand = demoHandAt(elapsed);
-  applyGesture(interpreter.update(hand, [system.width, system.height]));
+  const gesture = interpreter.update(hand, [system.width, system.height]);
+  applyGesture(gesture);
+  if (state.panelVisible) {
+    statusView.setFps(30);
+    statusView.update(gesture);
+  }
 }
 
 async function runSelfTest() {

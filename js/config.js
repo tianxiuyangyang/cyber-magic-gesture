@@ -31,6 +31,14 @@ export const INITIAL = Object.freeze({
   mirror: true,
 });
 
+/** 外骨骼面板配色（RGB，供 canvas 使用）。 */
+export const HAND_COLORS = Object.freeze({
+  bone: [100, 224, 232],
+  joint: [206, 250, 255],
+  pinch: [189, 162, 255],
+  muted: [83, 118, 132],
+});
+
 /** 粒子场参数。距离单位除注明外都是 CSS 像素，力是 px/s²。 */
 export const FIELD = Object.freeze({
   // ---- 数量与形态 ----
