@@ -44,12 +44,12 @@ const state = {
   // 力场强度（0..1，随时间渐变而不是跳变）
   pinchStrength: 0,
   pinchTarget: 0,
-  pushStrength: 0,
-  pushTarget: 0,
+  ringStrength: 0,
+  ringTarget: 0,
 
   // 屏幕位置（CSS 像素）
   attractorPos: null,
-  repulsorPos: null,
+  ringPos: null,
   cursorPos: null,
   cursorAlpha: 0,
 
@@ -277,16 +277,17 @@ function resetSession() {
   state.gesture = null;
   state.pinchStrength = 0;
   state.pinchTarget = 0;
-  state.pushStrength = 0;
-  state.pushTarget = 0;
+  state.ringStrength = 0;
+  state.ringTarget = 0;
   state.attractorPos = null;
-  state.repulsorPos = null;
+  state.ringPos = null;
   state.cursorPos = null;
   state.cursorAlpha = 0;
   state.panelVisible = false;
   state.fps = 0;
   state.fpsCount = 0;
   state.fpsSince = 0;
+  system.setRing(null);
   window.clearTimeout(state.panelHideTimer);
   dom.panel?.classList.remove('is-visible');
   dom.panel?.setAttribute('aria-hidden', 'true');
@@ -330,15 +331,16 @@ function showMenu(message) {
   stopLoop();
   state.pinchStrength = 0;
   state.pinchTarget = 0;
-  state.pushStrength = 0;
-  state.pushTarget = 0;
+  state.ringStrength = 0;
+  state.ringTarget = 0;
   state.attractorPos = null;
-  state.repulsorPos = null;
+  state.ringPos = null;
   state.cursorPos = null;
   state.cursorAlpha = 0;
   state.gesture = null;
   system.setAttractor(null);
   system.setRepulsor(null);
+  system.setRing(null);
   dom.preview.hidden = true;
   state.panelVisible = false;
   window.clearTimeout(state.panelHideTimer);
@@ -495,14 +497,14 @@ function applyGesture(gesture) {
 
   if (!gesture.present) {
     state.pinchTarget = 0;
-    state.pushTarget = 0;
+    state.ringTarget = 0;
     state.cursorPos = null;
     return;
   }
 
   if (gesture.pinch) {
     state.pinchTarget = 1;
-    state.pushTarget = 0;
+    state.ringTarget = 0;
     if (gesture.pinchPoint) {
       state.attractorPos = gesture.pinchPoint;
       state.cursorPos = gesture.pinchPoint;
@@ -518,16 +520,17 @@ function applyGesture(gesture) {
     system.burst(gesture.pinchPoint[0], gesture.pinchPoint[1], 0.6);
   }
 
-  if (gesture.pointing && !gesture.pinch) {
-    state.pushTarget = 1;
-    if (gesture.indexTip) state.repulsorPos = gesture.indexTip;
+  // 伸出食指：不再向外推成圆，而是形成围绕指尖的三维中空星环
+  if (gesture.pointing && !gesture.pinch && gesture.indexTip) {
+    state.ringTarget = 1;
+    state.ringPos = gesture.indexTip;
   } else {
-    state.pushTarget = 0;
+    state.ringTarget = 0;
   }
   if (gesture.cursor) state.cursorPos = gesture.cursor;
 }
 
-/** 力场强度渐变 + 组装吸引/推开对象 + 光标淡入淡出。 */
+/** 力场强度渐变 + 组装吸引/星环对象 + 光标淡入淡出。 */
 function updateForces(dt) {
   const rampIn = FIELD.attractRampIn > 0 ? 1 / FIELD.attractRampIn : 20;
   const rampOut = FIELD.attractRampOut > 0 ? 1 / FIELD.attractRampOut : 20;
@@ -540,15 +543,16 @@ function updateForces(dt) {
     state.attractorPos = null;
   }
 
-  const pushIn = FIELD.pushRampIn > 0 ? 1 / FIELD.pushRampIn : 20;
-  const pushOut = FIELD.pushRampOut > 0 ? 1 / FIELD.pushRampOut : 20;
-  const pushRate = state.pushTarget > state.pushStrength ? pushIn : pushOut;
-  state.pushStrength = state.pushTarget > state.pushStrength
-    ? Math.min(state.pushTarget, state.pushStrength + pushRate * dt)
-    : Math.max(state.pushTarget, state.pushStrength - pushRate * dt);
-  if (state.pushStrength < 0.002 && state.pushTarget === 0) {
-    state.pushStrength = 0;
-    state.repulsorPos = null;
+  // 星环力度渐入/渐出：伸出食指时所有粒子收束到三维中空环
+  const ringIn = FIELD.ringRampIn > 0 ? 1 / FIELD.ringRampIn : 20;
+  const ringOut = FIELD.ringRampOut > 0 ? 1 / FIELD.ringRampOut : 20;
+  const ringRate = state.ringTarget > state.ringStrength ? ringIn : ringOut;
+  state.ringStrength = state.ringTarget > state.ringStrength
+    ? Math.min(state.ringTarget, state.ringStrength + ringRate * dt)
+    : Math.max(state.ringTarget, state.ringStrength - ringRate * dt);
+  if (state.ringStrength < 0.002 && state.ringTarget === 0) {
+    state.ringStrength = 0;
+    state.ringPos = null;
   }
 
   const minDim = Math.min(system.width, system.height);
@@ -565,14 +569,18 @@ function updateForces(dt) {
     system.setAttractor(null);
   }
 
-  if (state.pushStrength > 0.001 && state.repulsorPos) {
-    system.setRepulsor({
-      x: state.repulsorPos[0],
-      y: state.repulsorPos[1],
-      strength: state.pushStrength,
+  if (state.ringStrength > 0.001 && state.ringPos) {
+    system.setRing({
+      x: state.ringPos[0],
+      y: state.ringPos[1],
+      strength: state.ringStrength,
+      radius: minDim * FIELD.ringRadius,
+      tube: minDim * FIELD.ringTube,
+      tilt: FIELD.ringTilt,
+      perspective: FIELD.ringPerspective,
     });
   } else {
-    system.setRepulsor(null);
+    system.setRing(null);
   }
 
   // 指尖光圈淡入淡出
@@ -588,7 +596,7 @@ function drawGestureCursor(now) {
   const [x, y] = state.cursorPos;
   const alpha = state.cursorAlpha;
   const pinching = state.pinchStrength > 0.5 || state.pinchTarget > 0;
-  const pushing = state.pushStrength > 0.02 && !pinching;
+  const ringing = state.ringStrength > 0.02 && !pinching;
   const color = pinching ? CORE_COLOR : [110, 226, 236];
 
   const ctx = system.ctx;
@@ -598,7 +606,7 @@ function drawGestureCursor(now) {
   ctx.globalAlpha = alpha;
 
   const pulse = 1 + Math.sin(now * 0.0024) * 0.04;
-  const ringRadius = (pinching ? 15 : 11) * (pinching ? 1.45 : 1) * pulse;
+  const ringRadius = (pinching ? 15 : ringing ? 13 : 11) * (pinching ? 1.45 : 1) * pulse;
 
   const halo = ctx.createRadialGradient(x, y, 0, x, y, ringRadius * 3);
   halo.addColorStop(0, rgba(color, 0.4));
@@ -608,16 +616,6 @@ function drawGestureCursor(now) {
   ctx.beginPath();
   ctx.arc(x, y, ringRadius * 3, 0, TAU);
   ctx.fill();
-
-  // 指尖推开时的力场轮廓
-  if (pushing) {
-    const fieldRadius = FIELD.pushRadius * (0.55 + 0.25 * Math.sin(now * 0.0018));
-    ctx.strokeStyle = rgba(color, 0.06 * alpha * state.pushStrength);
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.arc(x, y, fieldRadius, 0, TAU);
-    ctx.stroke();
-  }
 
   ctx.lineWidth = 1.3;
   ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
@@ -770,9 +768,9 @@ function onVisibilityChange() {
 }
 
 function onWindowBlur() {
-  // 切走窗口时松开力场，避免回来时残留一个聚拢核心
+  // 切走窗口时松开力场，避免回来时残留一个聚拢核心 / 星环
   state.pinchTarget = 0;
-  state.pushTarget = 0;
+  state.ringTarget = 0;
   hideHint(true);
 }
 

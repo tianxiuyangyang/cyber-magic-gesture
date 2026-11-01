@@ -76,7 +76,24 @@ export const FIELD = Object.freeze({
   attractRampIn: 0.32,    // 捏合开始的力度渐入（秒）
   attractRampOut: 0.5,    // 松开的力度渐出（秒）
 
-  // ---- 指尖推开 ----
+  // ---- 三维星环（伸出食指） ----
+  ringRadius: 0.17,       // 环半径（按屏幕短边比例）
+  ringTube: 0.035,        // 环管半径（决定环的厚度与中空大小）
+  ringTilt: 1.05,         // 环面倾斜（弧度）
+  ringSpin: 2.4,          // 粒子沿环快速旋转的角速度（rad/s）
+  ringTubeSpin: 1.8,      // 环管截面自旋
+  ringYaw: 0.18,          // 环面左右摆动幅度（弧度，避免转到侧面变薄）
+  ringYawSpeed: 0.25,     // 左右摆动速度
+  ringRoll: 0.25,         // 环面在屏幕内翻滚（rad/s）
+  ringPerspective: 0.12,  // 前后景透视强度
+  ringStiffness: 55,      // 把粒子收束到环面的弹簧刚度
+  ringDamping: 8,         // 环面跟随阻尼
+  ringMaxAccel: 12000,    // 环力加速度上限
+  ringRampIn: 0.35,       // 星环成形渐入（秒）
+  ringRampOut: 0.5,       // 星环散开渐出（秒）
+  ringDepthSize: 0.22,    // 环前后景粒子的大小差
+
+  // ---- 指尖推开（保留给力场测试 / 备用） ----
   pushRadius: 160,        // 推开半径
   pushStrength: 4200,     // 最大推开加速度
   pushRampIn: 0.18,       // 指尖力场渐入

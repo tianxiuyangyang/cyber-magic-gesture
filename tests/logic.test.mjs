@@ -25,7 +25,7 @@ import {
 import { buildScriptedHands, makeHand } from '../js/scripted-hand.js';
 import { mapLandmarkerResult } from '../js/landmark-result.js';
 import { fitLandmarks, skeletonScale } from '../js/hand-status.js';
-import { createParticle, pickColor, stepParticle } from '../js/particles.js';
+import { createParticle, pickColor, ringTarget, seedRingPhases, stepParticle } from '../js/particles.js';
 
 /** 可复现的伪随机源。 */
 function seeded(seed) {
@@ -380,6 +380,117 @@ test('指尖推开：力场半径内的粒子被推远', () => {
   }
   assert.ok(p.x > 560 + 1, `指尖附近的粒子应被推开（Δx=${(p.x - 560).toFixed(1)}）`);
   assert.ok(Math.abs(p.y - 400) < 60, '推力以径向为主，不应大幅偏移');
+});
+
+test('伸出食指：三维星环中心是空的，并且会旋转', () => {
+  const ring = {
+    x: 500,
+    y: 400,
+    radius: 160,
+    tube: 30,
+    tilt: 1.05,
+    spin: 0,
+    tubeSpin: 0,
+    yaw: 0,
+    roll: 0,
+    perspective: 0,
+  };
+  const p = { ringPhase: 0, ringTubeRadius: 0, ringTubeAngle: 0 };
+  let min = Infinity;
+  let max = 0;
+  for (let i = 0; i < 96; i += 1) {
+    p.ringPhase = (i / 96) * Math.PI * 2;
+    const target = ringTarget(p, ring);
+    const d = Math.hypot(target.x - ring.x, target.y - ring.y);
+    min = Math.min(min, d);
+    max = Math.max(max, d);
+    assert.ok(target.depth >= -1 && target.depth <= 1);
+  }
+  assert.ok(min > 40, `星环中心应保持中空（min=${min.toFixed(1)}）`);
+  assert.ok(max > 130 && max < 200, `星环外沿应接近 R+tube（max=${max.toFixed(1)}）`);
+
+  // 实际运行时环面会左右小幅摆动 + 屏幕内翻滚；任何姿态下环心都不能被填满
+  for (const orientation of [
+    { yaw: 0.18, roll: 0.6 },
+    { yaw: -0.18, roll: 1.2 },
+    { yaw: 0, roll: 2.0 },
+  ]) {
+    let minOriented = Infinity;
+    for (let i = 0; i < 96; i += 1) {
+      p.ringPhase = (i / 96) * Math.PI * 2;
+      const target = ringTarget(p, { ...ring, ...orientation });
+      minOriented = Math.min(minOriented, Math.hypot(target.x - ring.x, target.y - ring.y));
+    }
+    assert.ok(minOriented > 40, `环面姿态 ${JSON.stringify(orientation)} 下环心仍应中空（min=${minOriented.toFixed(1)}）`);
+  }
+
+  const first = ringTarget(
+    { ringPhase: 0, ringTubeRadius: 0, ringTubeAngle: 0 },
+    { ...ring, spin: 0.6 },
+  );
+  const second = ringTarget(
+    { ringPhase: 0, ringTubeRadius: 0, ringTubeAngle: 0 },
+    { ...ring, spin: 1.2 },
+  );
+  assert.ok(Math.hypot(first.x - second.x, first.y - second.y) > 20, '沿环旋转后目标点应移动');
+});
+
+test('星环粒子均匀铺满整圈，不会全挤在一段弧上', () => {
+  // 所有粒子都挤在环心左上方的一小块区域，模拟最坏情况
+  const particles = Array.from({ length: 120 }, (_, index) => ({
+    x: 80 + (index % 9) * 2,
+    y: 80 + (index % 7) * 2,
+    ringPhase: null,
+    ringTubeRadius: 0,
+    ringTubeAngle: 0,
+  }));
+  const ring = { x: 500, y: 400, radius: 160, tube: 30 };
+  seedRingPhases(particles, ring, () => 0.5);
+
+  const phases = particles.map((particle) => particle.ringPhase).sort((a, b) => a - b);
+  const expected = (Math.PI * 2) / particles.length;
+  for (let i = 1; i < phases.length; i += 1) {
+    assert.ok(
+      Math.abs(phases[i] - phases[i - 1] - expected) < 1e-9,
+      '相邻粒子的环面相位差应完全一致',
+    );
+  }
+  const wrap = phases[0] + Math.PI * 2 - phases[phases.length - 1];
+  assert.ok(Math.abs(wrap - expected) < 1e-9, '首尾间距也应一致');
+  assert.ok(phases[phases.length - 1] > Math.PI * 1.8, '相位应覆盖整圈');
+  assert.ok(particles.every((particle) => particle.ringTubeRadius > 0), '环管厚度也应分配');
+});
+
+test('伸出食指：粒子被拉进环面，而不是停在圆心', () => {
+  const p = createParticle(1000, 800, seeded(9));
+  p.x = 100;
+  p.y = 100;
+  p.vx = 0;
+  p.vy = 0;
+  p.ringPhase = 0;
+  p.ringTubeRadius = 0;
+  p.ringTubeAngle = 0;
+  const ring = {
+    x: 500,
+    y: 400,
+    radius: 160,
+    tube: 30,
+    tilt: 1.05,
+    spin: 0,
+    tubeSpin: 0,
+    yaw: 0,
+    roll: 0,
+    perspective: 0,
+    strength: 1,
+  };
+  for (let i = 0; i < 180; i += 1) {
+    stepParticle(p, { ring }, 1 / 60, FIELD, () => 0.5);
+  }
+  const target = ringTarget(p, ring);
+  const d = Math.hypot(p.x - target.x, p.y - target.y);
+  const center = Math.hypot(p.x - ring.x, p.y - ring.y);
+  assert.ok(d < 30, `粒子应贴合环面（d=${d.toFixed(1)}）`);
+  assert.ok(center > 50, `粒子不应停在环心（d=${center.toFixed(1)}）`);
 });
 
 test('粒子速度不会超过上限', () => {

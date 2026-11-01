@@ -33,6 +33,81 @@ export function pickColor(rand = Math.random) {
   return palette[palette.length - 1].color;
 }
 
+/**
+ * 三维环面上的目标点（正交投影 + 轻微透视）。
+ *
+ * 环面先按 tilt 绕 X 轴倾斜，再按 yaw 绕 Y 轴、roll 绕视线轴缓慢翻滚；
+ * 粒子在 (theta, phi) 上分布，theta 随 spin 旋转、phi 随 tubeSpin 自旋。
+ * 环中心永远留空，形成中空的三维星环。
+ */export function ringTarget(particle, ring) {
+  const radius = Math.max(1, ring.radius || 1);
+  const tube = Math.max(0, ring.tube || 0);
+  const theta = (particle.ringPhase || 0) + (ring.spin || 0);
+  const phi = (particle.ringTubeAngle || 0) + (ring.tubeSpin || 0);
+  const tubeRadius = Number.isFinite(particle.ringTubeRadius) ? particle.ringTubeRadius : 0;
+
+  const radial = radius + tubeRadius * Math.cos(phi);
+  let x = radial * Math.cos(theta);
+  let y = radial * Math.sin(theta);
+  let z = tubeRadius * Math.sin(phi);
+
+  // 绕 X 轴倾斜
+  const tilt = ring.tilt || 0;
+  const ct = Math.cos(tilt);
+  const st = Math.sin(tilt);
+  const y1 = y * ct - z * st;
+  const z1 = y * st + z * ct;
+
+  // 绕 Y 轴缓慢转动
+  const yaw = ring.yaw || 0;
+  const cy = Math.cos(yaw);
+  const sy = Math.sin(yaw);
+  const x2 = x * cy + z1 * sy;
+  const z2 = -x * sy + z1 * cy;
+
+  // 绕视线轴翻滚
+  const roll = ring.roll || 0;
+  const cr = Math.cos(roll);
+  const sr = Math.sin(roll);
+  const x3 = x2 * cr - y1 * sr;
+  const y3 = x2 * sr + y1 * cr;
+
+  const depth = z2 / (radius + tube || 1);
+  const perspective = 1 + depth * (ring.perspective || 0);
+  return {
+    x: ring.x + x3 * perspective,
+    y: ring.y + y3 * perspective,
+    depth,
+  };
+}
+
+/**
+ * 把粒子均匀铺满整个环面。
+ *
+ * 关键：先按粒子当前相对环心的方位排序，再按顺序分配等间距的 theta。
+ * 这样即使所有粒子原本挤在同一侧，也会沿圆周均匀展开，而不是叠在一段弧上；
+ * 同时保持原有圆周顺序，收束过程不会大量交叉。
+ */
+export function seedRingPhases(particles, ring, rand = Math.random) {
+  const count = particles.length;
+  if (!count) return;
+  const order = particles.map((particle, index) => ({
+    particle,
+    index,
+    angle: Math.atan2(particle.y - ring.y, particle.x - ring.x),
+  }));
+  order.sort((a, b) => a.angle - b.angle || a.index - b.index);
+
+  const tube = Math.max(0, ring.tube || 0);
+  for (let rank = 0; rank < order.length; rank += 1) {
+    const particle = order[rank].particle;
+    particle.ringPhase = (rank / count) * TAU;
+    particle.ringTubeRadius = tube * (0.22 + 0.78 * Math.sqrt(rand()));
+    particle.ringTubeAngle = rand() * TAU;
+    particle.ringDepth = 0;
+  }
+}
+
 /** 在 [0,width]×[0,height] 里随机生成一颗粒子。 */
 export function createParticle(width, height, rand = Math.random) {
   const depth = 0.3 + rand() * 0.7;              // 0.3 远景 … 1 近景
@@ -74,23 +149,27 @@ export function createParticle(width, height, rand = Math.random) {
  * @param {object} [forces]
  * @param {{x:number,y:number,strength:number,sigma:number,coreRadius:number,escapeReach:number}|null} forces.attractor
  *   捏合吸引核心。strength 0..1；sigma/coreRadius/escapeReach 为绝对像素值。
- * @param {{x:number,y:number,strength:number}|null} forces.repulsor 指尖推开力场
+ * @param {{x:number,y:number,strength:number}|null} forces.repulsor 指尖推开力场（备用）
+ * @param {{x:number,y:number,strength:number,radius:number,tube:number,tilt:number,spin:number,tubeSpin:number,yaw:number,roll:number,perspective:number}|null} forces.ring
+ *   伸出食指时的三维中空星环；radius/tube 为像素值。
  * @param {{width:number,height:number}|null} forces.bounds 屏幕边界（超出过多时温和弹回）
  * @param {number} dt 步长（秒）
  * @param {object} [cfg] 参数（默认 FIELD）
  * @param {() => number} [rand] 随机源（测试可注入确定性随机）
  */
 export function stepParticle(p, forces = {}, dt, cfg = FIELD, rand = Math.random) {
-  const { attractor = null, repulsor = null, bounds = null } = forces;
+  const { attractor = null, repulsor = null, ring = null, bounds = null } = forces;
+  const ringBlend = ring ? Math.min(1, Math.max(0, ring.strength || 0)) : 0;
+  const freeScale = 1 - ringBlend * 0.94;
   let ax = 0;
   let ay = 0;
 
   // 1) 自由游走：缓慢旋转的方向 + 随机抖动 —— 它们生来就想漂
-  ax += Math.cos(p.wanderAngle) * cfg.wanderSpeed * p.wanderSpeedMul;
-  ay += Math.sin(p.wanderAngle) * cfg.wanderSpeed * p.wanderSpeedMul;
+  ax += Math.cos(p.wanderAngle) * cfg.wanderSpeed * p.wanderSpeedMul * freeScale;
+  ay += Math.sin(p.wanderAngle) * cfg.wanderSpeed * p.wanderSpeedMul * freeScale;
   p.wanderAngle += (rand() - 0.5) * cfg.wanderTurn * dt;
-  ax += (rand() - 0.5) * cfg.wanderJitter;
-  ay += (rand() - 0.5) * cfg.wanderJitter;
+  ax += (rand() - 0.5) * cfg.wanderJitter * freeScale;
+  ay += (rand() - 0.5) * cfg.wanderJitter * freeScale;
 
   // 2) 回家的弹性：聚拢越狠，想回到原位的愿望越强（束缚与挣脱的拉扯）。
   //    距离太远时封顶，避免刚聚起来的星云又被拽散。
@@ -102,8 +181,9 @@ export function stepParticle(p, forces = {}, dt, cfg = FIELD, rand = Math.random
       hx *= cfg.homeCap / homeDist;
       hy *= cfg.homeCap / homeDist;
     }
-    ax += hx * cfg.homeK;
-    ay += hy * cfg.homeK;
+    const homeScale = 1 - ringBlend * 0.97;
+    ax += hx * cfg.homeK * homeScale;
+    ay += hy * cfg.homeK * homeScale;
   }
 
   // 3) 捏合：吸引 + 旋涡 + 软核排斥 + 挣脱冲动 + 近核粘滞
@@ -174,7 +254,7 @@ export function stepParticle(p, forces = {}, dt, cfg = FIELD, rand = Math.random
     p.escapeUrge = Math.max(0, p.escapeUrge - dt * 0.8);
   }
 
-  // 4) 指尖推开：把面前的星尘扫开，留下尾流
+  // 4) 指尖推开（备用；伸出食指现在改为三维星环）
   if (repulsor && repulsor.strength > 0.001) {
     const dx = p.x - repulsor.x;
     const dy = p.y - repulsor.y;
@@ -191,7 +271,30 @@ export function stepParticle(p, forces = {}, dt, cfg = FIELD, rand = Math.random
     }
   }
 
-  // 5) 积分与限速
+  // 5) 三维星环：把粒子收束到指尖周围的中空环面上，并沿环持续旋转
+  if (ring && ringBlend > 0.001) {
+    if (p.ringPhase == null) {
+      // 兜底：正常由 seedRingPhases 均匀分配；这里用随机相位避免退化成一段弧
+      p.ringPhase = rand() * TAU;
+      p.ringTubeRadius = ring.tube * (0.2 + 0.8 * Math.sqrt(rand()));
+      p.ringTubeAngle = rand() * TAU;
+    }
+
+    const target = ringTarget(p, ring);
+    const stiffness = cfg.ringStiffness * ringBlend;
+    const maxAccel = cfg.ringMaxAccel * ringBlend;
+    let fx = (target.x - p.x) * stiffness - p.vx * cfg.ringDamping;
+    let fy = (target.y - p.y) * stiffness - p.vy * cfg.ringDamping;
+    fx = Math.max(-maxAccel, Math.min(maxAccel, fx));
+    fy = Math.max(-maxAccel, Math.min(maxAccel, fy));
+    ax += fx;
+    ay += fy;
+    p.ringDepth = target.depth;
+  } else {
+    p.ringDepth = 0;
+  }
+
+  // 6) 积分与限速
   const damping = Math.exp(-cfg.damping * dt);
   p.vx = (p.vx + ax * dt) * damping;
   p.vy = (p.vy + ay * dt) * damping;
@@ -207,7 +310,7 @@ export function stepParticle(p, forces = {}, dt, cfg = FIELD, rand = Math.random
   // 挣脱的余辉随时间衰减
   if (p.flash > 0) p.flash = Math.max(0, p.flash - dt * 2.6);
 
-  // 6) 漂出屏幕太多就温和地弹回来（平时是自由的，只是别丢太远）
+  // 7) 漂出屏幕太多就温和地弹回来（平时是自由的，只是别丢太远）
   if (bounds && bounds.width > 0 && bounds.height > 0) {
     const margin = cfg.margin;
     if (p.x < -margin) {
@@ -241,6 +344,7 @@ export class ParticleSystem {
     this.particles = [];
     this.attractor = null;
     this.repulsor = null;
+    this.ring = null;
     this.rings = [];
     this.time = 0;
     this._sprites = new Map();
@@ -305,6 +409,26 @@ export class ParticleSystem {
     this.repulsor = repulsor;
   }
 
+  /** 设置三维星环；传 null 时散开，并清空粒子的环面轨道槽。 */
+  setRing(ring) {
+    if (!ring) {
+      if (this.ring) {
+        for (const particle of this.particles) {
+          particle.ringPhase = null;
+          particle.ringDepth = 0;
+        }
+      }
+      this.ring = null;
+      return;
+    }
+
+    // 首次成环，或环面存在但还有新粒子没分到轨道时，重新均匀铺满
+    if (!this.ring || this.particles.some((particle) => particle.ringPhase == null)) {
+      seedRingPhases(this.particles, ring);
+    }
+    this.ring = ring;
+  }
+
   /** 在 (x,y) 放一个脉冲环（捏合开始/结束时的冲击波）。 */
   burst(x, y, power = 1) {
     this.rings.push({ x, y, age: 0, life: FIELD.ringLife, power });
@@ -313,9 +437,19 @@ export class ParticleSystem {
   update(dt) {
     const clamped = Math.min(0.05, Math.max(0, dt));
     this.time += clamped;
+    if (this.ring) {
+      // 环面旋转、管截面自旋与缓慢翻滚。
+      // yaw 只做小幅左右摆动，避免整圈转到侧面时投影变薄、环心被填满。
+      this.ring.spin = this.time * FIELD.ringSpin;
+      this.ring.tubeSpin = this.time * FIELD.ringTubeSpin;
+      this.ring.yaw = Math.sin(this.time * FIELD.ringYawSpeed) * FIELD.ringYaw;
+      this.ring.roll = this.time * FIELD.ringRoll;
+      this.ring.tilt = FIELD.ringTilt + Math.sin(this.time * 0.45) * 0.05;
+    }
     const forces = {
       attractor: this.attractor,
       repulsor: this.repulsor,
+      ring: this.ring,
       bounds: { width: this.width, height: this.height },
     };
     for (const particle of this.particles) {
@@ -349,10 +483,13 @@ export class ParticleSystem {
     this._drawLinks(ctx);
 
     const attractor = this.attractor;
+    const ringActive = !!this.ring;
     for (const particle of this.particles) {
       const speed = Math.hypot(particle.vx, particle.vy);
+      const depth = ringActive && Number.isFinite(particle.ringDepth) ? particle.ringDepth : 0;
+      const size = particle.size * (1 + depth * FIELD.ringDepthSize);
       const twinkle = 0.72 + 0.28 * Math.sin(this.time * particle.twinkleSpeed + particle.twinkle);
-      const alpha = particle.alpha * twinkle;
+      const alpha = Math.min(1, particle.alpha * twinkle * (1 + depth * 0.12));
       const flash = particle.flash > 0 ? particle.flash : 0;
       let hot = false;
       if (attractor) {
@@ -371,7 +508,7 @@ export class ParticleSystem {
         ctx.strokeStyle = flash > 0.05
           ? `rgba(255, 226, 186, ${0.22 + flash * 0.4})`
           : rgba(particle.color, 0.05 + alpha * 0.3 * k);
-        ctx.lineWidth = Math.max(0.6, particle.size * (0.8 + flash * 0.5));
+        ctx.lineWidth = Math.max(0.6, size * (0.8 + flash * 0.5));
         ctx.lineCap = 'round';
         ctx.beginPath();
         ctx.moveTo(particle.x - particle.vx * inverse, particle.y - particle.vy * inverse);
@@ -381,7 +518,7 @@ export class ParticleSystem {
 
       // 星芒十字（少量粒子，增加精致感）
       if (particle.glint) {
-        const arm = particle.size * (3.6 + flash * 2);
+        const arm = size * (3.6 + flash * 2);
         ctx.strokeStyle = `rgba(222, 250, 255, ${0.16 * alpha})`;
         ctx.lineWidth = 0.7;
         ctx.beginPath();
@@ -394,14 +531,14 @@ export class ParticleSystem {
 
       // 辉光 + 白心（靠近捏合核心时颜色变暖）
       const sprite = this._sprite(particle.color, hot);
-      const half = particle.size * FIELD.halo;
+      const half = size * FIELD.halo;
       ctx.globalAlpha = alpha;
       ctx.drawImage(sprite, particle.x - half, particle.y - half, half * 2, half * 2);
       ctx.fillStyle = flash > 0.02
         ? `rgba(255, 248, 230, ${0.92})`
         : 'rgba(255, 255, 255, 0.9)';
       ctx.beginPath();
-      ctx.arc(particle.x, particle.y, Math.max(0.5, particle.size * (0.55 + flash * 0.25)), 0, TAU);
+      ctx.arc(particle.x, particle.y, Math.max(0.5, size * (0.55 + flash * 0.25)), 0, TAU);
       ctx.fill();
     }
     ctx.globalAlpha = 1;
